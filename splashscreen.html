@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Starting Sloth CV</title>
+    <style>
+      :root {
+        --bg-color: #ffffff;
+        --text-color: #171717;
+        --border-color: #e5e5e5;
+        --progress-bg: #f4f4f5;
+        --progress-fill: #171717;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-color: #0a0a0a;
+          --text-color: #ededed;
+          --border-color: #27272a;
+          --progress-bg: #27272a;
+          --progress-fill: #ededed;
+        }
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: transparent;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        overflow: hidden;
+        user-select: none;
+      }
+
+      .splash-container {
+        width: 100vw;
+        height: 100vh;
+        background-color: var(--bg-color);
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 24px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .logo-wrapper {
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      .logo-wrapper img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      .text-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-color);
+        letter-spacing: 0.5px;
+      }
+
+      .subtitle {
+        font-size: 11px;
+        color: #71717a;
+        font-weight: 500;
+      }
+
+      .progress-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background-color: var(--progress-bg);
+      }
+
+      .progress-fill {
+        height: 100%;
+        width: 0%;
+        background-color: var(--progress-fill);
+        animation: loading 2.5s ease-in-out infinite;
+        border-radius: 0 4px 4px 0;
+      }
+
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(0.95); opacity: 0.8; }
+      }
+
+      @keyframes loading {
+        0% { width: 0%; transform: translateX(0); }
+        50% { width: 100%; transform: translateX(0); }
+        100% { width: 100%; transform: translateX(100%); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="splash-container">
+      <div class="logo-wrapper">
+        <!-- SVG Logo from your assets -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 32px; height: 32px; color: var(--text-color);">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+        </svg>
+      </div>
+      <div class="text-wrapper">
+        <div class="title">SLOTH CV</div>
+        <div class="subtitle">Starting application...</div>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill"></div>
+      </div>
+    </div>
+  </body>
+</html>

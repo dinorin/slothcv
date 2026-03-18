@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sloth CV</title>
+    <style>
+      /* Apply cached dark mode instantly — before any JS runs */
+      html.dark { background: #0a0a0a; }
+      body { margin: 0; padding: 0; background: white; }
+      html.dark body { background: #0a0a0a; }
+    </style>
+    <script>
+      // Restore dark mode before first paint to avoid flash
+      if (localStorage.getItem('slothcv_dark') === '1') {
+        document.documentElement.classList.add('dark');
+      }
+
+      // Disable right-click context menu (hides "Inspect")
+      document.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+      }, false);
+
+      // Disable F12 and other dev shortcuts
+      document.addEventListener('keydown', (e) => {
+        if (
+          e.key === 'F12' ||
+          (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+          (e.ctrlKey && e.key === 'U')
+        ) {
+          e.preventDefault();
+        }
+      }, false);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
