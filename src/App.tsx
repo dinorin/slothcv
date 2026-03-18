@@ -66,7 +66,6 @@ export default function App() {
 
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const showToast = useCallback((text: string, type: 'info' | 'success' | 'error' = 'info') => {
     setToastMsg({ text, type });
@@ -157,13 +156,8 @@ export default function App() {
   }, [messages]);
 
   const handleClearAllData = () => {
-    setShowClearConfirm(true);
-  };
-
-  const executeClearAllData = () => {
     setSessions([]);
     handleNewChat();
-    setShowClearConfirm(false);
   };
 
 
@@ -485,17 +479,6 @@ export default function App() {
         onSaved={() => {}}
         onClearData={handleClearAllData}
         t={t}
-      />
-
-      <ConfirmModal
-        open={showClearConfirm}
-        title={t.clearData}
-        message={t.clearDataConfirm}
-        confirmText={t.clearData}
-        cancelText={t.cancel}
-        isDanger={true}
-        onConfirm={executeClearAllData}
-        onCancel={() => setShowClearConfirm(false)}
       />
 
       {/* Hidden file input */}
