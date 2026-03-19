@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { MessageSquare, Plus, Trash2, Settings, FileDown, Eye, EyeOff, ChevronRight, ImagePlus, X, ZoomIn, ZoomOut, Maximize, Copy } from 'lucide-react';
+import { MessageSquare, Plus, Trash2, Settings, FileDown, Eye, EyeOff, ChevronRight, ImagePlus, X, ZoomIn, ZoomOut, Maximize, Copy, RotateCcw, Check, Pencil, Square, Loader2, ChevronDown, ArrowUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import ReactMarkdown from 'react-markdown';
@@ -12,9 +12,10 @@ import { generateResume, HistoryMessage } from './services/llm';
 import { getSettings } from './services/settings';
 import { saveSession, listSessions, loadSession, deleteSession, StoredSession, SessionSummary } from './services/storage';
 import { ChatMessage, Language, ResumeData } from './types';
-import { TRANSLATIONS } from './constants';
+import { PROVIDERS, TRANSLATIONS } from './constants';
 import { cn } from './lib/utils';
 import ConfirmModal from './components/ConfirmModal';
+import appIcon from './assets/icon.svg';
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -58,6 +59,10 @@ export default function App() {
   const [isResizingPreview, setIsResizingPreview] = useState(false);
 
   const [input, setInput] = useState('');
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [currentModel, setCurrentModel] = useState<string>('');
+  const [quickModels, setQuickModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,9 +70,90 @@ export default function App() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isPdfExporting, setIsPdfExporting] = useState(false);
 
+  const fetchQuickModels = async () => {
+    if (!appSettings) return;
+    setIsLoadingModels(true);
+    try {
+      const provider = appSettings.llm.provider;
+      const cfg = appSettings.llm.configs[provider] || { 
+        base_url: provider === 'gemini' ? '' : 'https://api.openai.com/v1', 
+        api_key: '', 
+        model: '' 
+      };
+      
+      console.log(`[QuickModel] Fetching for ${provider} at ${cfg.base_url}`);
+      const list = await invoke<string[]>('fetch_models', { 
+        provider, 
+        baseUrl: cfg.base_url, 
+        apiKey: cfg.api_key 
+      });
+      setQuickModels(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
+  const handleQuickModelChange = async (val: string) => {
+    if (!appSettings) return;
+    
+    let nextProvider = appSettings.llm.provider;
+    let nextModel = val;
+
+    // Nếu người dùng chọn một provider khác (ví dụ: "provider:deepseek")
+    if (val.startsWith('provider:')) {
+      nextProvider = val.replace('provider:', '');
+      const providerCfg = appSettings.llm.configs[nextProvider];
+      nextModel = providerCfg?.model || '';
+      
+      // Fetch models cho provider mới ngay lập tức để cập nhật list
+      setIsLoadingModels(true);
+      try {
+        const list = await invoke<string[]>('fetch_models', { 
+          provider: nextProvider, 
+          baseUrl: providerCfg?.base_url || '', 
+          apiKey: providerCfg?.api_key || '' 
+        });
+        setQuickModels(list);
+        if (list.length > 0 && !nextModel) nextModel = list[0];
+      } catch (e) { console.error(e); }
+      finally { setIsLoadingModels(false); }
+    }
+
+    const nextSettings = {
+      ...appSettings,
+      llm: {
+        ...appSettings.llm,
+        provider: nextProvider,
+        model: nextModel,
+        // Cập nhật cả active fields
+        base_url: appSettings.llm.configs[nextProvider]?.base_url || '',
+        api_key: appSettings.llm.configs[nextProvider]?.api_key || '',
+        configs: {
+          ...appSettings.llm.configs,
+          [nextProvider]: {
+            ...appSettings.llm.configs[nextProvider],
+            model: nextModel
+          }
+        }
+      }
+    };
+
+    try {
+      await invoke('save_settings', { settings: nextSettings });
+      setAppSettings(nextSettings);
+      setCurrentModel(nextModel);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editInput, setEditInput] = useState('');
 
   const showToast = useCallback((text: string, type: 'info' | 'success' | 'error' = 'info') => {
     setToastMsg({ text, type });
@@ -79,6 +165,38 @@ export default function App() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isAbortedRef = useRef(false);
+
+  const stopProcessing = useCallback(() => {
+    isAbortedRef.current = true;
+    setIsLoading(false);
+    setAgentStatus(null);
+    
+    // Rollback: remove the last message if it was a user message waiting for AI, 
+    // or the last AI message if it was still typing.
+    setMessages(prev => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      if (last.role === 'user' || last.isTyping) {
+        const newMsgs = prev.slice(0, -1);
+        // If we removed an AI message, we might also want to remove the user message that triggered it
+        if (last.role === 'ai' && newMsgs.length > 0 && newMsgs[newMsgs.length - 1].role === 'user') {
+          // Restore resume data from the user message if it exists
+          const triggerMsg = newMsgs[newMsgs.length - 1];
+          if (triggerMsg.resumeHtml) {
+            setResumeData({ ...({} as ResumeData), resume_html: triggerMsg.resumeHtml });
+          }
+          return newMsgs.slice(0, -1);
+        }
+        // If we removed a user message, restore its resumeHtml
+        if (last.role === 'user' && last.resumeHtml) {
+          setResumeData({ ...({} as ResumeData), resume_html: last.resumeHtml });
+        }
+        return newMsgs;
+      }
+      return prev;
+    });
+  }, []);
 
   // ── Auto-resize Textarea ───────────────────────────────────────────────────
   useEffect(() => {
@@ -138,12 +256,25 @@ export default function App() {
   // ── Show window after frontend is ready ────────────────────
   useEffect(() => {
     invoke('app_ready').catch(() => {});
+    
+    // Disable context menu completely
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    document.addEventListener('contextmenu', handleContextMenu);
+
     // Load initial dark mode setting from Rust and apply it
     getSettings().then(s => {
       setDarkMode(s.dark_mode);
+      setAppSettings(s);
+      setCurrentModel(s.llm.model);
       if (s.dark_mode) localStorage.setItem('slothcv_dark', '1');
       else localStorage.setItem('slothcv_dark', '0');
     }).catch(() => {});
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+    };
   }, []);
 
   // ── Load session list on mount ────────────────────────────────────────────
@@ -159,13 +290,146 @@ export default function App() {
 
   const handleClearAllData = () => {
     setSessions([]);
+    setCurrentModel('');
     handleNewChat();
+  };
+
+  const simulateStreaming = async (fullContent: string) => {
+    const aiMsg: ChatMessage = {
+      role: 'ai',
+      content: '',
+      isTyping: true,
+    };
+    setMessages(prev => [...prev, aiMsg]);
+
+    let current = '';
+    const speed = 15; // ms per char
+    for (let i = 0; i < fullContent.length; i++) {
+      current += fullContent[i];
+      setMessages(prev => {
+        const last = [...prev];
+        last[last.length - 1] = { ...last[last.length - 1], content: current };
+        return last;
+      });
+      await new Promise(r => setTimeout(r, speed));
+    }
+
+    setMessages(prev => {
+      const last = [...prev];
+      last[last.length - 1] = { ...last[last.length - 1], isTyping: false };
+      return last;
+    });
   };
 
   const handleCopy = (text: string, idx: number) => {
     navigator.clipboard.writeText(text);
     setCopiedIdx(idx);
     setTimeout(() => setCopiedIdx(null), 2000);
+  };
+
+  const startEditing = (idx: number, content: string) => {
+    setEditingIdx(idx);
+    setEditInput(content === '(Photo attached)' ? '' : content);
+  };
+
+  const cancelEditing = () => {
+    if (editInput.trim()) {
+      setInput(editInput);
+    }
+    setEditingIdx(null);
+    setEditInput('');
+  };
+
+  const handleRetry = async (targetIdx?: number, overrideContent?: string) => {
+    if (isLoading) return;
+
+    let actualIdx: number;
+    if (targetIdx !== undefined) {
+      actualIdx = targetIdx;
+    } else {
+      // Find last user message
+      const lastUserMsgIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+      if (lastUserMsgIdx === -1) return;
+      actualIdx = messages.length - 1 - lastUserMsgIdx;
+    }
+
+    const lastUserMsg = { ...messages[actualIdx] };
+    if (overrideContent) {
+      lastUserMsg.content = overrideContent;
+    }
+
+    // Restore resume state from this point in history
+    const restoredResumeData = lastUserMsg.resumeHtml 
+      ? { ...({} as ResumeData), resume_html: lastUserMsg.resumeHtml } 
+      : null;
+    setResumeData(restoredResumeData);
+
+    // Slice messages to remove everything from the retry point onwards
+    const historyBeforeRetry = messages.slice(0, actualIdx);
+    const newHistory = [...historyBeforeRetry, lastUserMsg];
+    setMessages(newHistory);
+
+    setIsLoading(true);
+    isAbortedRef.current = false;
+    setAgentStatus(null);
+    setError(null);
+    setEditingIdx(null);
+
+    const historyToSend: HistoryMessage[] = newHistory
+      .filter(m => !m.isError)
+      .slice(1)
+      .slice(-15)
+      .map(m => ({ role: m.role, content: m.content }));
+
+    try {
+      const isFirstBuild = !restoredResumeData;
+      const result = await generateResume(
+        historyToSend,
+        restoredResumeData ?? undefined,
+        false,
+        notes,
+        language,
+        userPhoto ?? undefined,
+        (status) => setAgentStatus(status),
+        () => isAbortedRef.current,
+      );
+
+      if (isAbortedRef.current) return;
+
+      await simulateStreaming(result.coach_message ?? '');
+
+      if (isAbortedRef.current) return;
+
+      setMessages(prev => {
+        const last = [...prev];
+        const lastMsg = last[last.length - 1];
+        last[last.length - 1] = {
+          ...lastMsg,
+          options: result.metadata?.suggested_options,
+          isResumeUpdate: result.metadata?.is_data_modified,
+          resumeHtml: result.resume_html || lastMsg.resumeHtml,
+        };
+        return last;
+      });
+
+      if (result.metadata?.is_data_modified) {
+        setResumeData(result);
+        if (isFirstBuild) setIsPreviewOpen(true);
+      }
+    } catch (e: any) {
+      if (e.message === 'ABORTED') return;
+      const errMsg = String(e);
+      const isApiKeyError = errMsg.toLowerCase().includes('api key') || errMsg.includes('401');
+      setMessages(prev => [...prev, { 
+        role: 'ai', 
+        content: isApiKeyError ? t.apiKeyMissing : `${t.errorLabel}: ${errMsg}`,
+        options: isApiKeyError ? [t.openSettings] : undefined,
+        isError: true 
+      }]);
+    } finally {
+      setIsLoading(false);
+      setAgentStatus(null);
+    }
   };
 
 
@@ -238,10 +502,12 @@ export default function App() {
       role: 'user',
       content: userMsg || '(Photo attached)',
       photo: attachedPhoto ?? undefined,
+      resumeHtml: resumeData?.resume_html,
     };
     const updatedMessages = [...messages, newUserMessage];
     setMessages(updatedMessages);
     setIsLoading(true);
+    isAbortedRef.current = false;
 
     // Build history: limit to last 15 valid messages
     const MAX_HISTORY = 15;
@@ -261,26 +527,38 @@ export default function App() {
         language,
         activePhoto ?? undefined,
         (status) => setAgentStatus(status),
+        () => isAbortedRef.current,
       );
+
+      if (isAbortedRef.current) return;
 
       // Update title from first user message
       if (sessionTitle === t.newChat && userMsg) {
         setSessionTitle(userMsg.slice(0, 40));
       }
 
-      const aiMsg: ChatMessage = {
-        role: 'ai',
-        content: result.coach_message ?? '',
-        options: result.metadata?.suggested_options,
-        isResumeUpdate: result.metadata?.is_data_modified,
-      };
-      setMessages(prev => [...prev, aiMsg]);
+      await simulateStreaming(result.coach_message ?? '');
+
+      if (isAbortedRef.current) return;
+
+      setMessages(prev => {
+        const last = [...prev];
+        const lastMsg = last[last.length - 1];
+        last[last.length - 1] = {
+          ...lastMsg,
+          options: result.metadata?.suggested_options,
+          isResumeUpdate: result.metadata?.is_data_modified,
+          resumeHtml: result.resume_html || lastMsg.resumeHtml,
+        };
+        return last;
+      });
 
       if (result.metadata?.is_data_modified) {
         setResumeData(result);
         if (isFirstBuild) setIsPreviewOpen(true);
       }
     } catch (e: any) {
+      if (e.message === 'ABORTED') return;
       const errMsg = String(e);
       console.error('LLM Error:', errMsg);
       
@@ -322,6 +600,7 @@ export default function App() {
 
   // ── Session switch ────────────────────────────────────────────────────────
   const handleSwitchSession = async (id: string) => {
+    stopProcessing();
     try {
       const stored = await loadSession(id);
       setSessionId(stored.id);
@@ -337,6 +616,7 @@ export default function App() {
   };
 
   const handleNewChat = () => {
+    stopProcessing();
     setSessionId(generateId());
     setSessionTitle(t.newChat);
     setMessages([{ role: 'ai', content: t.welcome }]);
@@ -354,18 +634,38 @@ export default function App() {
     if (id === sessionId) handleNewChat();
   };
 
-  // ── Inject Local Fonts ────────────────────────────────────────────────────
+  // ── Inject Local Fonts & A4 Reset ─────────────────────────────────────────
   const getInjectedHtml = (html?: string) => {
     if (!html) return '';
     const baseUrl = window.location.origin;
     const fontCss = `
       <style>
+        /* Base A4 Reset — using physical units (mm) */
+        * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        html, body { 
+          margin: 0 !important; 
+          padding: 0 !important; 
+          width: 210mm !important; 
+          height: 297mm !important;
+          background-color: white;
+          overflow: hidden;
+          font-family: 'Inter', sans-serif;
+        }
         @font-face { font-family: 'Inter'; src: url('${baseUrl}/fonts/Inter-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; }
         @font-face { font-family: 'Inter'; src: url('${baseUrl}/fonts/Inter-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; }
         @font-face { font-family: 'Inter'; src: url('${baseUrl}/fonts/Inter-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; }
+        
+        /* Print optimizations */
+        @media print {
+          @page { size: 210mm 297mm; margin: 0; }
+          body { width: 210mm !important; height: 297mm !important; }
+        }
       </style>
     `;
-    return html.replace('</head>', `${fontCss}</head>`);
+    if (html.includes('</head>')) {
+      return html.replace('</head>', `${fontCss}</head>`);
+    }
+    return fontCss + html;
   };
 
   // ── PDF Export ────────────────────────────────────────────────────────────
@@ -425,6 +725,8 @@ export default function App() {
   };
   // ── Last options from messages ────────────────────────────────────────────
   const lastOptions = [...messages].reverse().find(m => m.options && m.options.length > 0)?.options;
+  const lastUserMsgIdx = [...messages].reverse().findIndex(m => m.role === 'user');
+  const actualLastUserMsgIdx = lastUserMsgIdx === -1 ? -1 : messages.length - 1 - lastUserMsgIdx;
 
   return (
     <div className={cn('relative flex flex-col h-screen bg-white dark:bg-[#0a0a0a] text-zinc-900 dark:text-zinc-100 font-sans', darkMode && 'dark')}>
@@ -499,11 +801,13 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onDarkModeChange={setDarkMode}
-        onSaved={() => {}}
-        onClearData={handleClearAllData}
+        onSaved={(_p, model) => {
+          setCurrentModel(model);
+          setQuickModels([]); // Reset list để fetch lại theo provider mới
+          getSettings().then(setAppSettings).catch(() => {});
+        }}        onClearData={handleClearAllData}
         t={t}
       />
-
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -547,11 +851,11 @@ export default function App() {
               <p className="text-[11px] text-zinc-400 px-3 py-4 text-center whitespace-nowrap">{t.noSessions}</p>
             ) : (
               sessions.map(s => (
-                <button
+                <div
                   key={s.id}
                   onClick={() => handleSwitchSession(s.id)}
                   className={cn(
-                    'group flex items-center justify-between w-full px-3 py-1.5 rounded-md text-left text-[12.5px] transition-colors min-w-0',
+                    'group flex items-center justify-between w-full px-3 py-1.5 rounded-md text-left text-[12.5px] transition-colors min-w-0 cursor-pointer',
                     s.id === sessionId
                       ? 'bg-zinc-200/50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium'
                       : 'hover:bg-zinc-100 dark:hover:bg-zinc-900/50 text-zinc-600 dark:text-zinc-400',
@@ -564,7 +868,7 @@ export default function App() {
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
-                </button>
+                </div>
               ))
             )}
           </div>
@@ -603,41 +907,54 @@ export default function App() {
             {messages.map((msg, idx) => (
               <div key={idx} className={cn('flex flex-col max-w-3xl mx-auto group', msg.role === 'user' ? 'items-end' : 'items-start')}>
                 {msg.role === 'ai' ? (
-                  <div className="w-full space-y-3 relative group">
-                    <div className="flex items-center gap-2 mb-1">
+                  <div className="w-full space-y-2 relative group/msg text-zinc-900 dark:text-zinc-100">
+                    <div className="flex items-center gap-2">
                       <div className="w-5 h-5 rounded-md bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center">
                         <img src={appIcon} alt="AI" className="w-3.5 h-3.5 invert dark:invert-0" />
                       </div>
                       <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Sloth AI Agent</span>
-                      
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleCopy(msg.content, idx); }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all ml-auto"
-                        title={t.copy}
-                      >
-                        {copiedIdx === idx ? <span className="text-[10px] font-bold text-green-500 uppercase">{t.copied}</span> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
                     </div>
 
-                    <div 
-                      className="text-[14px] leading-relaxed text-gray-800 dark:text-gray-200 pl-7 cursor-pointer hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 rounded-lg py-1 transition-colors"
-                      onClick={() => handleCopy(msg.content, idx)}
-                    >
+                    <div className="text-[14px] leading-relaxed pl-7">
                       <ReactMarkdown
                         components={{
                           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
                           strong: ({ children }) => <strong className="font-semibold text-black dark:text-white">{children}</strong>,
                           ul: ({ children }) => <ul className="list-disc list-inside space-y-1 mt-2 mb-2">{children}</ul>,
-                          li: ({ children }) => <li className="text-[13.5px] text-gray-700 dark:text-gray-300">{children}</li>,
+                          li: ({ children }) => <li className="text-[13.5px] opacity-90">{children}</li>,
                         }}
                       >
                         {msg.content}
                       </ReactMarkdown>
+                      {msg.isTyping && (
+                        <span className="inline-block w-1.5 h-4 bg-zinc-400 dark:bg-zinc-600 ml-1 animate-pulse align-middle" />
+                      )}
                     </div>
 
+                    {!msg.isTyping && (
+                      <div className="flex items-center gap-1 pl-7 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCopy(msg.content, idx); }}
+                          className="p-1.5 rounded-md hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-400 hover:text-zinc-600 transition-all"
+                          title={t.copy}
+                        >
+                          {copiedIdx === idx ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                        {idx === messages.length - 1 && !isLoading && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRetry(); }}
+                            className="p-1.5 rounded-md hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-400 hover:text-zinc-600 transition-all"
+                            title="Retry"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* Artifact Card */}
-                    {msg.isResumeUpdate && (
-                      <div className="mt-4">
+                    {msg.isResumeUpdate && !msg.isTyping && (
+                      <div className="mt-4 pl-7">
                         <button
                           onClick={() => setIsPreviewOpen(true)}
                           className={cn(
@@ -664,9 +981,9 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  <div className="max-w-[85%] space-y-2 relative group">
+                  <div className="max-w-[85%] space-y-1 relative group/user flex flex-col items-end w-full">
                     {msg.photo && (
-                      <div className="flex justify-end mb-2 pl-7">
+                      <div className="mb-2">
                         <img
                           src={msg.photo}
                           alt="Attached"
@@ -674,22 +991,57 @@ export default function App() {
                         />
                       </div>
                     )}
-                    {msg.content && msg.content !== '(Photo attached)' && (
-                      <div className="flex items-start gap-2 justify-end">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleCopy(msg.content, idx); }}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all shrink-0 mt-1"
-                          title={t.copy}
-                        >
-                          {copiedIdx === idx ? <span className="text-[10px] font-bold text-green-500 uppercase">{t.copied}</span> : <Copy className="w-3.5 h-3.5" />}
-                        </button>
-                        <div 
-                          className="bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-tr-sm px-4 py-2.5 text-[14px] leading-relaxed shadow-sm cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                          onClick={() => handleCopy(msg.content, idx)}
-                        >
-                          {msg.content}
+                    
+                    {editingIdx === idx ? (
+                      <div className="w-full max-w-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 shadow-sm">
+                        <textarea
+                          value={editInput}
+                          onChange={(e) => setEditInput(e.target.value)}
+                          className="w-full bg-transparent border-none outline-none text-[14px] text-zinc-900 dark:text-zinc-100 resize-none min-h-[80px]"
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                          <button
+                            onClick={cancelEditing}
+                            className="px-3 py-1 text-[11px] font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                          >
+                            {t.cancel || 'Cancel'}
+                          </button>
+                          <button
+                            onClick={() => handleRetry(idx, editInput)}
+                            disabled={!editInput.trim() || isLoading}
+                            className="px-3 py-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md text-[11px] font-bold transition-all disabled:opacity-50"
+                          >
+                            {t.send || 'Send'}
+                          </button>
                         </div>
                       </div>
+                    ) : (
+                      <>
+                        {msg.content && msg.content !== '(Photo attached)' && (
+                          <div className="bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-tr-sm px-4 py-2.5 text-[14px] leading-relaxed shadow-sm">
+                            {msg.content}
+                          </div>
+                        )}
+                        <div className="opacity-0 group-hover/user:opacity-100 transition-opacity flex items-center gap-1 mt-1">
+                          {!isLoading && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); startEditing(idx, msg.content); }}
+                              className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 transition-all"
+                              title="Edit"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCopy(msg.content, idx); }}
+                            className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 transition-all"
+                            title={t.copy}
+                          >
+                            {copiedIdx === idx ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -714,21 +1066,11 @@ export default function App() {
 
             {isLoading && (
               <div className="flex justify-start max-w-3xl mx-auto w-full">
-                <div className="flex flex-col gap-2 py-2">
-                  <div className="flex gap-1.5 items-center">
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:0ms]" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:300ms]" />
-                  </div>
-                  {agentStatus && (
-                    <motion.p 
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 italic"
-                    >
-                      {agentStatus}
-                    </motion.p>
-                  )}
+                <div className="flex items-center gap-3 py-2 px-4 bg-zinc-50/50 dark:bg-zinc-900/20 rounded-lg border border-zinc-100 dark:border-zinc-800/40">
+                  <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse" />
+                  <p className="text-[12px] font-mono text-zinc-500 dark:text-zinc-400">
+                    {agentStatus || 'Processing...'}
+                  </p>
                 </div>
               </div>
             )}
@@ -784,22 +1126,70 @@ export default function App() {
               />
 
               <div className="flex items-center justify-between px-2 pb-2 pt-1">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center justify-center w-8 h-8 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                  title={t.attachPhoto}
-                >
-                  <ImagePlus className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center justify-center w-8 h-8 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    title={t.attachPhoto}
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                  </button>
+                  {currentModel ? (
+                    <div className="relative flex items-center">
+                      <select
+                        value={currentModel}
+                        onChange={(e) => handleQuickModelChange(e.target.value)}
+                        onMouseDown={() => { if (quickModels.length === 0) fetchQuickModels(); }}
+                        className="appearance-none bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-md px-2 py-1 pr-6 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-tight outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all cursor-pointer"
+                      >
+                        <optgroup label={`${appSettings?.llm.provider.toUpperCase()} (Active)`}>
+                          <option value={currentModel}>{currentModel}</option>
+                          {quickModels.filter(m => m !== currentModel).map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </optgroup>
+                        
+                        <optgroup label="Switch Provider">
+                          {PROVIDERS.filter(p => {
+                            const cfg = appSettings?.llm.configs[p.id];
+                            return p.id !== appSettings?.llm.provider && (cfg?.api_key || p.local);
+                          }).map(p => (
+                            <option key={p.id} value={`provider:${p.id}`}>
+                              ➜ Use {p.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                      <ChevronDown className="absolute right-1.5 w-2.5 h-3 text-zinc-400 pointer-events-none" />
+                      {isLoadingModels && <Loader2 className="absolute -right-5 w-3 h-3 text-zinc-400 animate-spin" />}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 px-2 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 uppercase tracking-tight transition-colors"
+                    >
+                      {t.setupAi}
+                    </button>
+                  )}
+                </div>
 
-                <button
-                  onClick={handleSend}
-                  disabled={isLoading || (!input.trim() && !pendingPhoto)}
-                  className="flex items-center justify-center h-8 px-3 rounded-md bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 text-[12px] font-medium transition-colors disabled:opacity-30"
-                >
-                  {t.send}
-                </button>
-              </div>
+                 <button
+                   onClick={isLoading ? stopProcessing : handleSend}
+                   disabled={!isLoading && !input.trim() && !pendingPhoto}
+                   className={cn(
+                     "flex items-center justify-center h-8 rounded-md transition-colors",
+                     isLoading
+                       ? "w-8 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-900/30"
+                       : "w-8 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-black dark:hover:bg-white disabled:opacity-30 shadow-sm"
+                   )}
+                   title={isLoading ? t.cancel : t.send}
+                 >
+                   {isLoading ? (
+                     <Square className="w-2.5 h-3 fill-current" />
+                   ) : (
+                     <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+                   )}
+                 </button>              </div>
             </div>
           </div>
         </div>
@@ -841,42 +1231,71 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-hidden relative">
+              <div className="flex-1 overflow-hidden relative bg-zinc-100 dark:bg-[#050505]">
                 {resumeData?.resume_html ? (
                   <TransformWrapper
-                    initialScale={0.8}
+                    initialScale={1}
                     minScale={0.2}
-                    maxScale={3}
-                    centerOnInit
+                    maxScale={4}
+                    centerOnInit={true}
+                    limitToBounds={true} // Bật giới hạn không cho kéo ra ngoài
                     wheel={{ step: 0.1 }}
+                    alignmentAnimation={{ sizeX: 0, sizeY: 0 }} // Tự động kéo về nếu kéo quá lề
                   >
-                    {({ zoomIn, zoomOut, resetTransform }) => (
-                      <>
-                        <div className="absolute top-4 right-4 z-10 flex items-center gap-1 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border border-zinc-200 dark:border-zinc-800 p-1 rounded-lg shadow-sm">
-                          <button onClick={() => zoomOut()} className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors" title={t.zoomOut}>
-                            <ZoomOut className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => resetTransform()} className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors" title={t.resetZoom}>
-                            <Maximize className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => zoomIn()} className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors" title={t.zoomIn}>
-                            <ZoomIn className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <TransformComponent wrapperClass="!w-full !h-full" contentClass="p-[100px] min-w-full min-h-full flex items-center justify-center">
-                          <div className="shadow-lg rounded-sm overflow-hidden bg-white ring-1 ring-zinc-200/50 dark:ring-zinc-800/50" style={{ width: 794, height: 1123, flexShrink: 0, transformOrigin: 'top center' }}>
+                    {({ zoomIn, zoomOut, resetTransform, setTransform }) => {
+                      // Hàm để fit chiều ngang
+                      const handleFitWidth = () => {
+                        // Chiều rộng A4 tính bằng pixel (xấp xỉ 794px cho 210mm)
+                        const a4WidthPx = 794; 
+                        // Lấy chiều rộng hiện tại của khung preview (trừ đi padding lề)
+                        const availableWidth = previewWidth - 80; 
+                        const scale = availableWidth / a4WidthPx;
+                        setTransform(0, 40, scale, 200); // Căn giữa top, với scale mới
+                      };
+
+                      return (
+                        <>
+                          <div className="absolute top-4 right-4 z-10 flex items-center gap-1 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm border border-zinc-200 dark:border-zinc-800 p-1 rounded-lg shadow-sm">
+                            <button onClick={() => zoomOut()} className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors" title={t.zoomOut}>
+                              <ZoomOut className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              onClick={() => handleFitWidth()} 
+                              className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors" 
+                              title="Fit Width"
+                            >
+                              <Maximize className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => zoomIn()} className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors" title={t.zoomIn}>
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <TransformComponent 
+                            wrapperClass="!w-full !h-full cursor-grab active:cursor-grabbing" 
+                            contentClass="flex items-start justify-center min-w-full min-h-full"
+                          >
+                            <div 
+                              className="bg-white shadow-[0_0_50px_rgba(0,0,0,0.1)] dark:shadow-[0_0_50px_rgba(0,0,0,0.3)] my-10" 
+                              style={{ 
+                                width: '210mm', 
+                                height: '297mm', 
+                                flexShrink: 0,
+                                transformOrigin: 'top center'
+                              }}
+                            >
                             <iframe
                               ref={iframeRef}
                               srcDoc={getInjectedHtml(resumeData.resume_html)}
                               title="Resume Preview"
-                              sandbox="allow-same-origin"
+                              sandbox="allow-same-origin allow-scripts"
                               style={{ width: '100%', height: '100%', border: 'none', display: 'block', pointerEvents: 'none' }}
                             />
                           </div>
                         </TransformComponent>
                       </>
-                    )}
-                  </TransformWrapper>
+                    );
+                  }}
+                </TransformWrapper>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-zinc-400 space-y-3">
                     <FileDown className="w-8 h-8 opacity-20" />

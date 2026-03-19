@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-// XOR key — changes the on-disk bytes so the key is never plaintext in any file.
-// Not cryptographic, but prevents casual inspection of the config directory.
 const XOR_SEED: &[u8] = b"slothcv\xde\xad\xbe\xef\x13\x37\xc0\xde\xfa\xce\xba\xbe\x00\xff\x42\x69";
 
 fn obfuscate(s: &str) -> String {
@@ -28,11 +27,18 @@ fn deobfuscate(hex: &str) -> String {
     String::from_utf8(bytes).unwrap_or_default()
 }
 
-// ── What the frontend sees ────────────────────────────────────────────────────
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct LlmProviderConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmSettings {
     pub provider: String,
+    pub configs: HashMap<String, LlmProviderConfig>,
+    // Fields for backward compatibility and active state
     pub base_url: String,
     pub api_key: String,
     pub model: String,
@@ -49,6 +55,7 @@ impl Default for AppSettings {
         AppSettings {
             llm: LlmSettings {
                 provider: "gemini".to_string(),
+                configs: HashMap::new(),
                 base_url: String::new(),
                 api_key: String::new(),
                 model: String::new(),
@@ -58,135 +65,140 @@ impl Default for AppSettings {
     }
 }
 
-// ── Disk format (api_key never written here) ──────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-struct StoredRaw {
-    #[serde(default)]
-    llm: StoredLlmRaw,
-    #[serde(default)]
+// Disk formats
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredConfig {
+    provider: String,
+    configs: HashMap<String, LlmProviderConfigSave>,
     dark_mode: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct StoredLlmRaw {
-    #[serde(default)]
-    provider: String,
-    #[serde(default)]
-    base_url: String,
-    #[serde(default)]
-    model: String,
-    /// Legacy field — present in old settings.json, migrated on first read.
-    #[serde(default)]
-    api_key: String,
-}
-
-#[derive(Debug, Serialize)]
-struct StoredSave {
-    llm: StoredLlmSave,
-    dark_mode: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct StoredLlmSave {
-    provider: String,
+#[derive(Debug, Serialize, Deserialize)]
+struct LlmProviderConfigSave {
     base_url: String,
     model: String,
 }
-
-// ── Paths ─────────────────────────────────────────────────────────────────────
 
 fn config_dir(app: &AppHandle) -> PathBuf {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .unwrap_or_else(|_| PathBuf::from("."));
+    let dir = app.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("."));
     let _ = fs::create_dir_all(&dir);
     dir
 }
 
 fn settings_path(app: &AppHandle) -> PathBuf {
-    config_dir(app).join("settings.json")
+    config_dir(app).join("settings.v2.json")
 }
 
-fn key_path(app: &AppHandle) -> PathBuf {
-    config_dir(app).join("api.key")
+fn keys_path(app: &AppHandle) -> PathBuf {
+    config_dir(app).join("api.keys")
 }
 
-// ── Key file helpers ──────────────────────────────────────────────────────────
-
-fn key_read(app: &AppHandle) -> String {
-    fs::read_to_string(key_path(app))
-        .map(|s| deobfuscate(s.trim()))
-        .unwrap_or_default()
+fn keys_read(app: &AppHandle) -> HashMap<String, String> {
+    let content = fs::read_to_string(keys_path(app)).unwrap_or_default();
+    if content.is_empty() { return HashMap::new(); }
+    let deob = deobfuscate(content.trim());
+    serde_json::from_str(&deob).unwrap_or_default()
 }
 
-fn key_write(app: &AppHandle, key: &str) -> Result<(), String> {
-    let key = key.trim();
-    if key.is_empty() {
-        let _ = fs::remove_file(key_path(app));
-        return Ok(());
-    }
-    fs::write(key_path(app), obfuscate(key)).map_err(|e| format!("Failed to save API key: {e}"))
+fn keys_write(app: &AppHandle, keys: &HashMap<String, String>) -> Result<(), String> {
+    let json = serde_json::to_string(keys).map_err(|e| e.to_string())?;
+    fs::write(keys_path(app), obfuscate(&json)).map_err(|e| format!("Failed to save API keys: {e}"))
 }
-
-// ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn get_settings(app: AppHandle) -> AppSettings {
-    let raw: Option<StoredRaw> = fs::read_to_string(settings_path(&app))
+    let keys = keys_read(&app);
+    
+    // Try loading new format first
+    let stored: Option<StoredConfig> = fs::read_to_string(settings_path(&app))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
 
-    let stored = match raw {
-        None => return AppSettings::default(),
-        Some(s) => s,
-    };
+    match stored {
+        Some(s) => {
+            let mut configs = HashMap::new();
+            for (id, cfg) in s.configs {
+                configs.insert(id.clone(), LlmProviderConfig {
+                    base_url: cfg.base_url,
+                    model: cfg.model,
+                    api_key: keys.get(&id).cloned().unwrap_or_default(),
+                });
+            }
+            
+            let active_cfg = configs.get(&s.provider).cloned().unwrap_or_default();
 
-    // Migrate: old settings.json had api_key in plaintext — move it to key file.
-    let api_key = if !stored.llm.api_key.trim().is_empty() {
-        let key = stored.llm.api_key.trim().to_string();
-        let _ = key_write(&app, &key);
-        // Rewrite settings.json without the api_key field
-        let clean = StoredSave {
-            llm: StoredLlmSave {
-                provider: stored.llm.provider.clone(),
-                base_url: stored.llm.base_url.clone(),
-                model: stored.llm.model.clone(),
-            },
-            dark_mode: stored.dark_mode,
-        };
-        if let Ok(content) = serde_json::to_string_pretty(&clean) {
-            let _ = fs::write(settings_path(&app), content);
+            AppSettings {
+                llm: LlmSettings {
+                    provider: s.provider,
+                    configs,
+                    base_url: active_cfg.base_url,
+                    api_key: active_cfg.api_key,
+                    model: active_cfg.model,
+                },
+                dark_mode: s.dark_mode,
+            }
         }
-        key
-    } else {
-        key_read(&app)
-    };
+        None => {
+            // Migration from v1 or default
+            let old_path = config_dir(&app).join("settings.json");
+            let old_keys_path = config_dir(&app).join("api.key");
+            
+            let mut app_settings = AppSettings::default();
+            
+            if let Ok(content) = fs::read_to_string(old_path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    app_settings.dark_mode = json["dark_mode"].as_bool().unwrap_or(false);
+                    let provider = json["llm"]["provider"].as_str().unwrap_or("gemini").to_string();
+                    app_settings.llm.provider = provider.clone();
+                    
+                    let base_url = json["llm"]["base_url"].as_str().unwrap_or("").to_string();
+                    let model = json["llm"]["model"].as_str().unwrap_or("").to_string();
+                    let mut api_key = String::new();
+                    
+                    if let Ok(key_content) = fs::read_to_string(old_keys_path) {
+                        api_key = deobfuscate(key_content.trim());
+                    }
 
-    AppSettings {
-        llm: LlmSettings {
-            provider: stored.llm.provider,
-            base_url: stored.llm.base_url,
-            model: stored.llm.model,
-            api_key,
-        },
-        dark_mode: stored.dark_mode,
+                    let mut configs = HashMap::new();
+                    configs.insert(provider.clone(), LlmProviderConfig {
+                        base_url,
+                        model,
+                        api_key: api_key.clone(),
+                    });
+                    app_settings.llm.configs = configs;
+                    
+                    // Save to new format immediately
+                    let _ = save_settings(app, app_settings.clone());
+                }
+            }
+            app_settings
+        }
     }
 }
 
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
-    key_write(&app, &settings.llm.api_key)?;
+    let mut keys = HashMap::new();
+    let mut configs = HashMap::new();
 
-    let stored = StoredSave {
-        llm: StoredLlmSave {
-            provider: settings.llm.provider,
-            base_url: settings.llm.base_url,
-            model: settings.llm.model,
-        },
+    for (id, cfg) in &settings.llm.configs {
+        if !cfg.api_key.trim().is_empty() {
+            keys.insert(id.clone(), cfg.api_key.trim().to_string());
+        }
+        configs.insert(id.clone(), LlmProviderConfigSave {
+            base_url: cfg.base_url.clone(),
+            model: cfg.model.clone(),
+        });
+    }
+
+    keys_write(&app, &keys)?;
+
+    let stored = StoredConfig {
+        provider: settings.llm.provider,
+        configs,
         dark_mode: settings.dark_mode,
     };
+    
     let content = serde_json::to_string_pretty(&stored).map_err(|e| e.to_string())?;
     fs::write(settings_path(&app), content).map_err(|e| e.to_string())
 }

@@ -4,20 +4,22 @@ SlothCV is a powerful AI-driven resume builder desktop application, built with T
 
 ## Key Features
 
-- **AI-Driven Resume Generation**: Integrated with major LLMs (Gemini, OpenAI, Anthropic via API, or Local LLMs via Ollama) to consult and design your resume.
-- **Claude-style Artifacts**: Resume designs are displayed in a dedicated, sleek preview panel (artifact) that can be opened or closed seamlessly.
-- **Interactive Preview**: Full support for zooming and panning the resume design for pixel-perfect inspection.
-- **Native PDF Export**: Uses the browser's native print engine to export vector-quality PDFs, ensuring crisp text and full text-selection support.
-- **Local-First Storage**: Chat history and resume data are stored locally on your machine using Rust-powered backend (JSON/SQLite).
-- **Minimalist UI**: A clean, Linear/Notion-inspired interface featuring Dark Mode and resizable panels.
-- **Developer Protection**: Built-in protection against Inspect Element and common dev shortcuts to protect UI integrity.
+- **Multi-Provider AI Support**: Configure and switch between multiple AI providers (Google Gemini, DeepSeek, OpenAI, Groq, OpenRouter, Ollama, etc.) with saved API keys for each.
+- **Smart AI Agent**: A pro-active agent that designs, researches, and refines your resume using specialized tools.
+- **Real-time Status Tracking**: Detailed monitoring of agent actions (thinking, tool usage, search progress) in a clean, developer-style status bar.
+- **Modern UI Artifacts**: High-end resume designs displayed in a dedicated preview panel with Card-based layouts, modern typography, and FontAwesome icons.
+- **Interactive Preview (PDF Style)**: Professional zoom, pan, and "Fit to Width" capabilities with bounding constraints for a seamless review experience.
+- **Token-Efficient Design**: Optimized agent loops using surgical search-and-replace edits to minimize API costs and maximize response speed.
+- **Native PDF Export**: Crystal-clear vector PDFs using the browser's native print engine.
+- **Local-First & Secure**: All data stored locally on your machine. API keys are obfuscated and stored securely.
+- **UI Integrity**: Built-in protection against Inspect Element and common dev shortcuts to ensure a focused user experience.
 
 ## Tech Stack
 
 - **Frontend**: React 19, TypeScript, Tailwind CSS, Framer Motion.
-- **Backend**: Rust, Tauri v2.
-- **Libraries**: `react-zoom-pan-pinch` (navigation), `lucide-react` (icons).
-- **Fonts**: Inter (Self-hosted).
+- **Backend**: Rust, Tauri v2, Reqwest (Native-TLS).
+- **Libraries**: `react-zoom-pan-pinch` (navigation), `lucide-react` & `FontAwesome 6` (icons).
+- **Fonts**: Inter, Montserrat, Playfair Display (Google Fonts).
 
 ## Project Structure
 
@@ -48,7 +50,7 @@ npm run tauri:build
 ```
 
 ## API Configuration
-Users need to provide an API Key from a supported provider (e.g., Google AI Studio for Gemini) in the **Settings** menu to enable AI features.
+Configure your preferred AI providers in the **Settings** menu. You can save multiple API keys and switch models directly from the chat interface.
 
 ---
-*Developed by [dinorin](https://github.com/dinorin) and the Sloth Team.*
+*Developed by [dinorin](https://github.com/dinorin).*

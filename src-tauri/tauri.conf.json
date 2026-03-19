@@ -19,7 +19,8 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "visible": false
+        "visible": false,
+        "devtools": true
       },
       {
         "label": "splashscreen",
@@ -37,6 +38,9 @@
     "security": {
       "csp": null
     }
+  },
+  "plugins": {
+    "devtools": {}
   },
   "bundle": {
     "active": true,

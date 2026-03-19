@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, Save, Key, Link, Tag, Moon, Sun, RefreshCw, AlertCircle, ChevronDown, Loader2 } from 'lucide-react';
+import { X, Save, Key, Link, Tag, Moon, Sun, RefreshCw, AlertCircle, ChevronDown, Loader2, Settings, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
 import { AppSettings } from '../types';
@@ -17,27 +17,7 @@ interface Props {
   t: any;
 }
 
-interface ProviderDef {
-  id: string;
-  name: string;
-  base_url: string;
-  needs_key: boolean;
-  local?: boolean;
-  key_placeholder?: string;
-}
-
-const PROVIDERS: ProviderDef[] = [
-  { id: 'gemini',     name: 'Google Gemini',  base_url: '',                                  needs_key: true,  key_placeholder: 'AIza...' },
-  { id: 'openai',     name: 'OpenAI',          base_url: 'https://api.openai.com/v1',         needs_key: true,  key_placeholder: 'sk-...' },
-  { id: 'groq',       name: 'Groq',            base_url: 'https://api.groq.com/openai/v1',    needs_key: true,  key_placeholder: 'gsk_...' },
-  { id: 'openrouter', name: 'OpenRouter',      base_url: 'https://openrouter.ai/api/v1',      needs_key: true,  key_placeholder: 'sk-or-...' },
-  { id: 'mistral',    name: 'Mistral',         base_url: 'https://api.mistral.ai/v1',         needs_key: true,  key_placeholder: 'API key' },
-  { id: 'deepseek',   name: 'DeepSeek',        base_url: 'https://api.deepseek.com/v1',       needs_key: true,  key_placeholder: 'sk-...' },
-  { id: 'together',   name: 'Together AI',     base_url: 'https://api.together.xyz/v1',       needs_key: true,  key_placeholder: 'API key' },
-  { id: 'ollama',     name: 'Ollama (local)',  base_url: 'http://localhost:11434/v1',          needs_key: false, local: true },
-  { id: 'lmstudio',   name: 'LM Studio',       base_url: 'http://localhost:1234/v1',           needs_key: false, local: true },
-  { id: 'custom',     name: 'Custom / Other',  base_url: '',                                  needs_key: false },
-];
+import { PROVIDERS } from '../constants';
 
 async function fetchModelsFromApi(provider: string, base_url: string, api_key: string): Promise<string[]> {
   return invoke<string[]>('fetch_models', { provider, baseUrl: base_url, apiKey: api_key });
@@ -45,9 +25,10 @@ async function fetchModelsFromApi(provider: string, base_url: string, api_key: s
 
 export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved, onClearData, t }: Props) {
   const [settings, setSettings] = useState<AppSettings>({
-    llm: { provider: 'gemini', base_url: '', api_key: '', model: '' },
+    llm: { provider: 'gemini', configs: {}, base_url: '', api_key: '', model: '' },
     dark_mode: false,
   });
+  const [activeTab, setActiveTab] = useState('gemini');
   const [models, setModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelError, setModelError] = useState('');
@@ -57,9 +38,6 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const providerDef = PROVIDERS.find((p) => p.id === settings.llm.provider) ?? PROVIDERS[PROVIDERS.length - 1];
-  const showBaseUrl = settings.llm.provider !== 'gemini';
-
   // Load settings when modal opens
   useEffect(() => {
     if (!open) return;
@@ -67,9 +45,11 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
     setModelError('');
     getSettings().then((s) => {
       setSettings(s);
-      doFetch(s.llm.provider, s.llm.base_url, s.llm.api_key);
+      setActiveTab(s.llm.provider);
+      const activeCfg = s.llm.configs[s.llm.provider] || { base_url: '', api_key: '', model: '' };
+      doFetch(s.llm.provider, activeCfg.base_url, activeCfg.api_key);
     }).catch(() => {});
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function doFetch(provider: string, base_url: string, api_key: string) {
     const def = PROVIDERS.find((p) => p.id === provider);
@@ -95,33 +75,48 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
     debounce.current = setTimeout(() => doFetch(provider, base_url, api_key), 700);
   }
 
-  function handleProviderChange(id: string) {
-    const def = PROVIDERS.find((p) => p.id === id)!;
-    setModels([]);
-    setModelError('');
-    const next = { ...settings, llm: { ...settings.llm, provider: id, base_url: def.base_url, model: '' } };
-    setSettings(next);
-    scheduleFetch(id, def.base_url, settings.llm.api_key);
-  }
+  const currentTabConfig = settings.llm.configs[activeTab] || { 
+    base_url: PROVIDERS.find(p => p.id === activeTab)?.base_url || '', 
+    api_key: '', 
+    model: '' 
+  };
 
-  function handleApiKeyChange(val: string) {
-    const next = { ...settings, llm: { ...settings.llm, api_key: val } };
-    setSettings(next);
-    scheduleFetch(next.llm.provider, next.llm.base_url, val);
-  }
+  const providerDef = PROVIDERS.find((p) => p.id === activeTab) ?? PROVIDERS[PROVIDERS.length - 1];
+  const showBaseUrl = activeTab !== 'gemini';
 
-  function handleBaseUrlChange(val: string) {
-    const next = { ...settings, llm: { ...settings.llm, base_url: val } };
-    setSettings(next);
-    scheduleFetch(next.llm.provider, val, next.llm.api_key);
+  function updateConfig(id: string, updates: Partial<LlmProviderConfig>) {
+    setSettings(prev => ({
+      ...prev,
+      llm: {
+        ...prev.llm,
+        configs: {
+          ...prev.llm.configs,
+          [id]: { ...(prev.llm.configs[id] || { base_url: PROVIDERS.find(p => p.id === id)?.base_url || '', api_key: '', model: '' }), ...updates }
+        }
+      }
+    }));
   }
 
   async function handleSave() {
     setSaving(true);
     setSaveError('');
+    
+    // Set provider hiện tại là provider đang được chọn ở tab active
+    const finalSettings = {
+      ...settings,
+      llm: {
+        ...settings.llm,
+        provider: activeTab,
+        // Đồng bộ active fields cho backend v1 nếu cần
+        base_url: currentTabConfig.base_url,
+        api_key: currentTabConfig.api_key,
+        model: currentTabConfig.model
+      }
+    };
+
     try {
-      await saveSettings(settings);
-      onSaved?.(settings.llm.provider, settings.llm.model);
+      await saveSettings(finalSettings);
+      onSaved?.(finalSettings.llm.provider, finalSettings.llm.model);
       setSaved(true);
       setTimeout(() => { setSaved(false); onClose(); }, 700);
     } catch (e: unknown) {
@@ -140,7 +135,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
         await deleteSession(s.id);
       }
       const defaultSettings: AppSettings = {
-        llm: { provider: 'gemini', base_url: '', api_key: '', model: '' },
+        llm: { provider: 'gemini', configs: {}, base_url: '', api_key: '', model: '' },
         dark_mode: settings.dark_mode,
       };
       await saveSettings(defaultSettings);
@@ -154,8 +149,8 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
     }
   }
 
-  const modelOptions = settings.llm.model && !models.includes(settings.llm.model)
-    ? [settings.llm.model, ...models]
+  const modelOptions = currentTabConfig.model && !models.includes(currentTabConfig.model)
+    ? [currentTabConfig.model, ...models]
     : models;
 
   return (
@@ -166,7 +161,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
             onClick={(e) => e.target === e.currentTarget && onClose()}
           >
             <motion.div
@@ -174,14 +169,19 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 10 }}
               transition={{ duration: 0.15 }}
-              className="bg-white dark:bg-[#0a0a0a] rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border border-zinc-200 dark:border-zinc-800"
+              className="bg-white dark:bg-[#0a0a0a] rounded-2xl shadow-2xl w-full max-w-2xl h-[520px] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
             >
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 dark:border-zinc-800">
-                <h2 className="text-[12px] font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest">
-                  {t.settings}
-                </h2>
-                <div className="flex items-center gap-1">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center">
+                    <Settings className="w-4 h-4 text-white dark:text-zinc-900" />
+                  </div>
+                  <h2 className="text-[14px] font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest">
+                    {t.settings}
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => {
                       const dark = !settings.dark_mode;
@@ -191,124 +191,151 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                       saveSettings(next).catch(console.error);
                     }}
                     className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors"
-                    title={settings.dark_mode ? t.lightMode : t.darkMode}
                   >
                     {settings.dark_mode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
                   </button>
-                  <button
-                    onClick={onClose}
-                    className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md text-zinc-400 transition-colors"
-                  >
+                  <button onClick={onClose} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md text-zinc-400 transition-colors">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Body */}
-              <div className="px-6 py-5 space-y-5">
-                {/* Provider Selection */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block">
-                    {t.apiProvider}
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={settings.llm.provider}
-                      onChange={(e) => handleProviderChange(e.target.value)}
-                      className="w-full appearance-none bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-[13px] font-medium outline-none focus:ring-2 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/5 transition-all text-zinc-900 dark:text-zinc-100"
-                    >
-                      {PROVIDERS.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}{p.local ? ' 🔵' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
+              {/* Body: 2 Columns */}
+              <div className="flex flex-1 overflow-hidden">
+                {/* Left: Provider List */}
+                <div className="w-56 border-r border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20 overflow-y-auto p-2 space-y-1">
+                  <div className="px-3 py-2">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t.apiProvider}</span>
                   </div>
-                </div>
+                  {PROVIDERS.map((p) => {
+                    const isConfigured = settings.llm.configs[p.id]?.api_key || (!p.needs_key && settings.llm.configs[p.id]?.base_url);
+                    const isActive = activeTab === p.id;
+                    const isGlobalActive = settings.llm.provider === p.id;
 
-                {/* Base URL */}
-                {showBaseUrl && (
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block flex items-center gap-1">
-                      <Link className="w-3 h-3" /> {t.baseUrl}
-                    </label>
-                    <input
-                      type="text"
-                      value={settings.llm.base_url}
-                      onChange={(e) => handleBaseUrlChange(e.target.value)}
-                      placeholder="http://localhost:11434/v1"
-                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/5 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
-                    />
-                  </div>
-                )}
-
-                {/* API Key */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block flex items-center gap-1">
-                    <Key className="w-3 h-3" /> {t.apiKey}
-                    {!providerDef.needs_key && (
-                      <span className="normal-case font-normal text-zinc-400 dark:text-zinc-500 ml-1">{t.optionalLocal}</span>
-                    )}
-                  </label>
-                  <input
-                    type="password"
-                    value={settings.llm.api_key}
-                    onChange={(e) => handleApiKeyChange(e.target.value)}
-                    placeholder={providerDef.needs_key ? (providerDef.key_placeholder ?? t.apiKeyPlaceholder) : t.optionalLocal}
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/5 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
-                  />
-                </div>
-
-                {/* Model */}
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 block flex items-center justify-between">
-                    <span className="flex items-center gap-1.5"><Tag className="w-3 h-3" /> {t.model}</span>
-                    <button
-                      onClick={() => doFetch(settings.llm.provider, settings.llm.base_url, settings.llm.api_key)}
-                      disabled={loadingModels}
-                      className="flex items-center gap-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 disabled:opacity-40 transition-colors"
-                    >
-                      {loadingModels ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                      <span className="text-[10px] font-bold uppercase">{loadingModels ? t.saving : t.refresh}</span>
-                    </button>
-                  </label>
-                  <div className="relative">
-                    {modelOptions.length > 0 ? (
-                      <select
-                        value={settings.llm.model}
-                        onChange={(e) => setSettings((p) => ({ ...p, llm: { ...p.llm, model: e.target.value } }))}
-                        className="w-full appearance-none bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-[13px] font-medium outline-none focus:ring-2 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/5 transition-all text-zinc-900 dark:text-zinc-100"
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          setActiveTab(p.id);
+                          const cfg = settings.llm.configs[p.id] || { base_url: p.base_url, api_key: '', model: '' };
+                          doFetch(p.id, cfg.base_url, cfg.api_key);
+                        }}
+                        className={cn(
+                          'w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all',
+                          isActive 
+                            ? 'bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100' 
+                            : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
+                        )}
                       >
-                        <option value="" disabled>{t.selectModel}</option>
-                        {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    ) : (
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[12.5px] font-semibold truncate">{p.name}</span>
+                          {isGlobalActive && (
+                            <span className="text-[9px] font-bold text-indigo-500 uppercase">Active Now</span>
+                          )}
+                        </div>
+                        {isConfigured && !isActive && (
+                          <Check className="w-3 h-3 text-green-500 shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right: Config Panel */}
+                <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                  <div className="flex items-center gap-4 mb-2">
+                    <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-xl">
+                      {providerDef.id === 'gemini' ? '💎' : providerDef.local ? '🏠' : '☁️'}
+                    </div>
+                    <div>
+                      <h3 className="text-[16px] font-bold text-zinc-900 dark:text-zinc-100">{providerDef.name}</h3>
+                      <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{providerDef.local ? 'Local LLM Server' : 'Cloud API Provider'}</p>
+                    </div>
+                  </div>
+
+                  {/* Base URL */}
+                  {showBaseUrl && (
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5">
+                        <Link className="w-3 h-3" /> {t.baseUrl}
+                      </label>
                       <input
                         type="text"
-                        value={settings.llm.model}
-                        onChange={(e) => setSettings({ ...settings, llm: { ...settings.llm, model: e.target.value } })}
-                        placeholder={loadingModels ? t.fetchModels : providerDef.needs_key && !settings.llm.api_key ? t.enterKeyToLoad : t.modelNamePlaceholder}
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-[12px] outline-none focus:ring-2 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/5 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                        value={currentTabConfig.base_url}
+                        onChange={(e) => {
+                          updateConfig(activeTab, { base_url: e.target.value });
+                          scheduleFetch(activeTab, e.target.value, currentTabConfig.api_key);
+                        }}
+                        placeholder="http://localhost:11434/v1"
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
                       />
-                    )}
-                    {modelOptions.length > 0 && <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />}
-                  </div>
-                  {modelError && (
-                    <p className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 mt-1.5">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      {modelError}
-                    </p>
+                    </div>
                   )}
-                </div>
 
-                {saveError && (
-                  <p className="text-[11px] text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">{saveError}</p>
-                )}
+                  {/* API Key */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5">
+                      <Key className="w-3 h-3" /> {t.apiKey}
+                      {!providerDef.needs_key && <span className="normal-case font-normal opacity-60 ml-1">({t.optionalLocal})</span>}
+                    </label>
+                    <input
+                      type="password"
+                      value={currentTabConfig.api_key}
+                      onChange={(e) => {
+                        updateConfig(activeTab, { api_key: e.target.value });
+                        scheduleFetch(activeTab, currentTabConfig.base_url, e.target.value);
+                      }}
+                      placeholder={providerDef.needs_key ? (providerDef.key_placeholder ?? t.apiKeyPlaceholder) : t.optionalLocal}
+                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                    />
+                  </div>
+
+                  {/* Model */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><Tag className="w-3 h-3" /> {t.model}</span>
+                      <button
+                        onClick={() => doFetch(activeTab, currentTabConfig.base_url, currentTabConfig.api_key)}
+                        disabled={loadingModels}
+                        className="flex items-center gap-1 text-indigo-500 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+                      >
+                        {loadingModels ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        <span className="text-[10px] font-bold uppercase">{loadingModels ? t.saving : t.refresh}</span>
+                      </button>
+                    </label>
+                    <div className="relative">
+                      {modelOptions.length > 0 ? (
+                        <select
+                          value={currentTabConfig.model}
+                          onChange={(e) => updateConfig(activeTab, { model: e.target.value })}
+                          className="w-full appearance-none bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-zinc-900 dark:text-zinc-100"
+                        >
+                          <option value="" disabled>{t.selectModel}</option>
+                          {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={currentTabConfig.model}
+                          onChange={(e) => updateConfig(activeTab, { model: e.target.value })}
+                          placeholder={loadingModels ? t.fetchModels : providerDef.needs_key && !currentTabConfig.api_key ? t.enterKeyToLoad : t.modelNamePlaceholder}
+                          className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                        />
+                      )}
+                      {modelOptions.length > 0 && <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />}
+                    </div>
+                    {modelError && (
+                      <p className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        {modelError}
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0f0f0f]">
+              <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0f0f0f] shrink-0">
                 <button
                   onClick={() => setShowClearConfirm(true)}
                   disabled={saving}
@@ -317,6 +344,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                   {t.clearData}
                 </button>
                 <div className="flex items-center gap-3">
+                  {saveError && <span className="text-[11px] text-red-500 mr-2">{saveError}</span>}
                   <button onClick={onClose} className="px-4 py-2 text-[12px] font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-colors">
                     {t.close}
                   </button>
@@ -324,12 +352,12 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                     onClick={handleSave}
                     disabled={saving}
                     className={cn(
-                      'flex items-center gap-2 px-5 py-2 rounded-md text-[12px] font-bold tracking-wider transition-all',
-                      saved ? 'bg-green-600 text-white' : 'bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 shadow-sm',
+                      'flex items-center gap-2 px-6 py-2 rounded-xl text-[12px] font-bold tracking-wider transition-all shadow-lg active:scale-95',
+                      saved ? 'bg-green-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                     )}
                   >
-                    <Save className="w-3.5 h-3.5" />
-                    {saved ? t.saved : saving ? t.saving : t.save}
+                    {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                    {saved ? t.saved : saving ? t.saving : t.save + " & Activate"}
                   </button>
                 </div>
               </div>

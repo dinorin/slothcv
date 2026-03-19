@@ -99,14 +99,22 @@ export interface ChatMessage {
   photo?: string; // base64 data URI, only on user messages
   isResumeUpdate?: boolean; // If true, this AI message came with a resume update
   isError?: boolean; // If true, this is an error message that should not be sent to history
+  isTyping?: boolean; // If true, the message is being "streamed"
+  resumeHtml?: string; // The HTML content of the resume at this point in time
 }
 
 export type Language = "vi" | "en" | "fr" | "de" | "ja" | "ko" | "zh";
 
+export interface LlmProviderConfig {
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
 export interface LlmSettings {
-  /** "gemini" or "openai_compat" */
   provider: string;
-  /** Base URL for OpenAI-compatible endpoints (e.g. http://localhost:11434/v1) */
+  configs: Record<string, LlmProviderConfig>;
+  // Active fields (synced from configs[provider])
   base_url: string;
   api_key: string;
   model: string;
