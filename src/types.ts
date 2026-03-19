@@ -1,3 +1,5 @@
+export const MASKED_KEY = '__MASKED__';
+
 export type LayoutType = "one_column" | "two_column" | "modern_asymmetric" | "timeline";
 export type PhotoPlacement = "none" | "top_center_circle" | "top_right_square" | "sidebar_top" | "sidebar_top_circle";
 export type SkillsStyle = "tag_cloud" | "progress_bars" | "simple_list" | "icons_with_levels";

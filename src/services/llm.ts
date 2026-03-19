@@ -84,12 +84,21 @@ export async function generateResume(
   let isDataModified = false;
   let textResponse = response.text;
   let iteration = 0;
-  const MAX_ITERATIONS = 5;
+  const MAX_ITERATIONS = 3;
 
   // Agentic Loop: Handle tool calls sequentially
   while (response.function_calls.length > 0 && iteration < MAX_ITERATIONS) {
     checkAbort();
     iteration++;
+
+    // Mẫu tin nhắn AI trước khi thực hiện tool calls để đảm bảo thứ tự Role (User -> Model -> User)
+    // Gemini rất nghiêm ngặt về việc luân phiên vai trò.
+    const functionCallSummary = response.function_calls
+      .map(fc => `CALL [${fc.name}] with args: ${JSON.stringify(fc.args)}`)
+      .join('\n');
+    
+    history.push({ role: 'ai', content: functionCallSummary });
+
     const toolResults: HistoryMessage[] = [];
 
     for (const call of response.function_calls) {
@@ -124,7 +133,11 @@ export async function generateResume(
 
         case 'read_artifact': {
           onStatus?.(`[Tool: read_artifact] Reading current HTML`);
-          const currentHtml = newState.resume_html || '';
+          let currentHtml = newState.resume_html || '';
+          // TOKEN SAVING: Revert injected photo to placeholder to avoid huge payload
+          if (userPhoto && currentHtml.includes(userPhoto)) {
+            currentHtml = currentHtml.split(userPhoto).join('__PROFILE_PHOTO__');
+          }
           toolResults.push({ role: 'user', content: `TOOL_RESULT [read_artifact]:\n${currentHtml}` });
           break;
         }
@@ -178,20 +191,23 @@ export async function generateResume(
 
     if (toolResults.length === 0) break;
 
-    // Add results to history and call LLM again
-    history.push(...toolResults);
+    // Merge all tool results into a single user message to maintain role alternation
+    const mergedToolResults = toolResults.map(r => r.content).join('\n\n');
+    history.push({ role: 'user', content: mergedToolResults });
+
     checkAbort();
 
     if (iteration === 1) {
       onStatus?.('Processing information...');
     } else if (iteration === 2) {
-      onStatus?.('Refining design & details...');
+      onStatus?.('Finalizing everything...');
     } else {
       onStatus?.('Finalizing everything...');
     }
 
+    // Trim history to avoid sending huge payloads in subsequent iterations
     response = await invoke('generate_resume', {
-      history,
+      history: history.slice(-maxHistory),
       currentData: newState,
       notes: newState.notes || notes,
       language,

@@ -18,3 +18,7 @@ reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 urlencoding = "2.1"
+base64 = "0.22"
+
+[target.'cfg(debug_assertions)'.dependencies]
+tauri-plugin-mcp-bridge = "0.10.0"

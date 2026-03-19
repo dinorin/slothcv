@@ -18,13 +18,19 @@ fn app_ready(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+
+    builder
         .invoke_handler(tauri::generate_handler![
             app_ready,
             llm::generate_resume,
             llm::fetch_models,
             llm::web_search,
             llm::fetch_web_content,
+            llm::fetch_image_base64,
             settings::get_settings,
             settings::save_settings,
             storage::save_session,

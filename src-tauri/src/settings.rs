@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 const XOR_SEED: &[u8] = b"slothcv\xde\xad\xbe\xef\x13\x37\xc0\xde\xfa\xce\xba\xbe\x00\xff\x42\x69";
+pub const MASKED_SENTINEL: &str = "__MASKED__";
 
 fn obfuscate(s: &str) -> String {
     s.bytes()
@@ -79,6 +80,16 @@ struct LlmProviderConfigSave {
     model: String,
 }
 
+/// If frontend sends back the sentinel value, resolve to the real stored key.
+/// Otherwise return what was received (new key typed by user).
+pub fn resolve_api_key(app: &AppHandle, provider: &str, received: &str) -> String {
+    if received.trim() == MASKED_SENTINEL {
+        keys_read(app).get(provider).cloned().unwrap_or_default()
+    } else {
+        received.to_string()
+    }
+}
+
 fn config_dir(app: &AppHandle) -> PathBuf {
     let dir = app.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("."));
     let _ = fs::create_dir_all(&dir);
@@ -105,11 +116,46 @@ fn keys_write(app: &AppHandle, keys: &HashMap<String, String>) -> Result<(), Str
     fs::write(keys_path(app), obfuscate(&json)).map_err(|e| format!("Failed to save API keys: {e}"))
 }
 
+/// Internal: load settings with REAL api keys. Used by Rust backend only.
+pub fn load_settings_raw(app: &AppHandle) -> AppSettings {
+    let keys = keys_read(app);
+
+    let stored: Option<StoredConfig> = fs::read_to_string(settings_path(app))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+
+    match stored {
+        Some(s) => {
+            let mut configs = HashMap::new();
+            for (id, cfg) in s.configs {
+                let real_key = keys.get(&id).cloned().unwrap_or_default();
+                configs.insert(id.clone(), LlmProviderConfig {
+                    base_url: cfg.base_url,
+                    model: cfg.model,
+                    api_key: real_key,
+                });
+            }
+            let active_cfg = configs.get(&s.provider).cloned().unwrap_or_default();
+            AppSettings {
+                llm: LlmSettings {
+                    provider: s.provider,
+                    configs,
+                    base_url: active_cfg.base_url,
+                    api_key: active_cfg.api_key,
+                    model: active_cfg.model,
+                },
+                dark_mode: s.dark_mode,
+            }
+        }
+        None => AppSettings::default(),
+    }
+}
+
+/// Tauri command: load settings with api keys MASKED for frontend.
 #[tauri::command]
 pub fn get_settings(app: AppHandle) -> AppSettings {
     let keys = keys_read(&app);
-    
-    // Try loading new format first
+
     let stored: Option<StoredConfig> = fs::read_to_string(settings_path(&app))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok());
@@ -118,15 +164,14 @@ pub fn get_settings(app: AppHandle) -> AppSettings {
         Some(s) => {
             let mut configs = HashMap::new();
             for (id, cfg) in s.configs {
+                let real_key = keys.get(&id).cloned().unwrap_or_default();
                 configs.insert(id.clone(), LlmProviderConfig {
                     base_url: cfg.base_url,
                     model: cfg.model,
-                    api_key: keys.get(&id).cloned().unwrap_or_default(),
+                    api_key: if real_key.is_empty() { String::new() } else { MASKED_SENTINEL.to_string() },
                 });
             }
-            
             let active_cfg = configs.get(&s.provider).cloned().unwrap_or_default();
-
             AppSettings {
                 llm: LlmSettings {
                     provider: s.provider,
@@ -163,12 +208,17 @@ pub fn get_settings(app: AppHandle) -> AppSettings {
                     configs.insert(provider.clone(), LlmProviderConfig {
                         base_url,
                         model,
-                        api_key: api_key.clone(),
+                        api_key: if api_key.is_empty() { String::new() } else { MASKED_SENTINEL.to_string() },
                     });
                     app_settings.llm.configs = configs;
-                    
-                    // Save to new format immediately
-                    let _ = save_settings(app, app_settings.clone());
+
+                    // Save to new format immediately (pass real key via save)
+                    let mut save_cfg = app_settings.clone();
+                    // Restore real key so save_settings stores it properly
+                    if let Some(c) = save_cfg.llm.configs.get_mut(&provider) {
+                        c.api_key = api_key.clone();
+                    }
+                    let _ = save_settings(app, save_cfg);
                 }
             }
             app_settings
@@ -178,12 +228,19 @@ pub fn get_settings(app: AppHandle) -> AppSettings {
 
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
+    let existing_keys = keys_read(&app);
     let mut keys = HashMap::new();
     let mut configs = HashMap::new();
 
     for (id, cfg) in &settings.llm.configs {
-        if !cfg.api_key.trim().is_empty() {
-            keys.insert(id.clone(), cfg.api_key.trim().to_string());
+        let key = cfg.api_key.trim();
+        if key == MASKED_SENTINEL {
+            // Frontend sent back the sentinel — preserve whatever is stored
+            if let Some(existing) = existing_keys.get(id) {
+                keys.insert(id.clone(), existing.clone());
+            }
+        } else if !key.is_empty() {
+            keys.insert(id.clone(), key.to_string());
         }
         configs.insert(id.clone(), LlmProviderConfigSave {
             base_url: cfg.base_url.clone(),

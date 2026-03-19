@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use std::time::Duration;
 
-use crate::settings::{get_settings, AppSettings};
+use crate::settings::{load_settings_raw, AppSettings};
 
 // ─── Web Search & Scraper Implementation ──────────────────────────────────────
 
@@ -106,26 +106,26 @@ pub struct LlmResponse {
 
 fn tools_openai() -> Value {
     json!([
-        { "type": "function", "function": { "name": "web_search", "description": "Search the web for info.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] } } },
-        { "type": "function", "function": { "name": "fetch_web_content", "description": "Get webpage text.", "parameters": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } } },
+        { "type": "function", "function": { "name": "web_search", "description": "Search the web for info.", "parameters": { "type": "object", "properties": { "query": { "type": "string", "description": "The search query." } }, "required": ["query"] } } },
+        { "type": "function", "function": { "name": "fetch_web_content", "description": "Get webpage text.", "parameters": { "type": "object", "properties": { "url": { "type": "string", "description": "The URL to fetch." } }, "required": ["url"] } } },
         { "type": "function", "function": { "name": "read_artifact", "description": "Read the current HTML code of the resume. Use this to see what to change.", "parameters": { "type": "object", "properties": {}, "required": [] } } },
-        { "type": "function", "function": { "name": "edit_artifact", "description": "Apply a surgical search-and-replace edit to the current resume HTML.", "parameters": { "type": "object", "properties": { "search": { "type": "string", "description": "Exact text to find." }, "replace": { "type": "string", "description": "Text to replace with." } }, "required": ["search", "replace"] } } },
-        { "type": "function", "function": { "name": "render_resume", "description": "Create/update CV HTML (Full re-render).", "parameters": { "type": "object", "properties": { "html": { "type": "string" } }, "required": ["html"] } } },
-        { "type": "function", "function": { "name": "suggest_options", "description": "Provide user options.", "parameters": { "type": "object", "properties": { "options": { "type": "array", "items": {"type": "string"} }, "question": {"type": "string"} }, "required": ["options", "question"] } } },
-        { "type": "function", "function": { "name": "update_internal_notes", "description": "Update notes.", "parameters": { "type": "object", "properties": { "notes": {"type": "string"} }, "required": ["notes"] } } }
+        { "type": "function", "function": { "name": "edit_artifact", "description": "Apply a surgical search-and-replace edit to the current resume HTML.", "parameters": { "type": "object", "properties": { "search": { "type": "string", "description": "Exact text to find in current HTML." }, "replace": { "type": "string", "description": "Text to replace it with." } }, "required": ["search", "replace"] } } },
+        { "type": "function", "function": { "name": "render_resume", "description": "Create/update CV HTML (Full re-render). Use this for major layout changes.", "parameters": { "type": "object", "properties": { "html": { "type": "string", "description": "The complete HTML code for the resume." } }, "required": ["html"] } } },
+        { "type": "function", "function": { "name": "suggest_options", "description": "Provide a list of suggested options for the user to click.", "parameters": { "type": "object", "properties": { "options": { "type": "array", "items": {"type": "string"}, "description": "List of short option labels." }, "question": {"type": "string", "description": "A follow-up question for the user."} }, "required": ["options", "question"] } } },
+        { "type": "function", "function": { "name": "update_internal_notes", "description": "Update internal memory/notes about the user.", "parameters": { "type": "object", "properties": { "notes": {"type": "string", "description": "Consolidated user preferences and data."} }, "required": ["notes"] } } }
     ])
 }
 
 fn tools_gemini() -> Value {
     json!([{
-        "functionDeclarations": [
-            { "name": "web_search", "description": "Search web.", "parameters": { "type": "OBJECT", "properties": { "query": {"type": "STRING"} }, "required": ["query"] } },
-            { "name": "fetch_web_content", "description": "Get web text.", "parameters": { "type": "OBJECT", "properties": { "url": {"type": "STRING"} }, "required": ["url"] } },
-            { "name": "read_artifact", "description": "Read current resume HTML.", "parameters": { "type": "OBJECT", "properties": {}, "required": [] } },
-            { "name": "edit_artifact", "description": "Surgical search-and-replace edit.", "parameters": { "type": "OBJECT", "properties": { "search": {"type": "STRING"}, "replace": {"type": "STRING"} }, "required": ["search", "replace"] } },
-            { "name": "render_resume", "description": "Update CV HTML.", "parameters": { "type": "OBJECT", "properties": { "html": {"type": "STRING"} }, "required": ["html"] } },
-            { "name": "suggest_options", "description": "User options.", "parameters": { "type": "OBJECT", "properties": { "options": { "type": "ARRAY", "items": {"type": "STRING"} }, "question": {"type": "STRING"} }, "required": ["options", "question"] } },
-            { "name": "update_internal_notes", "description": "Update notes.", "parameters": { "type": "OBJECT", "properties": { "notes": {"type": "STRING"} }, "required": ["notes"] } }
+        "function_declarations": [
+            { "name": "web_search", "description": "Search web.", "parameters": { "type": "OBJECT", "properties": { "query": {"type": "STRING", "description": "Search query"} }, "required": ["query"] } },
+            { "name": "fetch_web_content", "description": "Get web text.", "parameters": { "type": "OBJECT", "properties": { "url": {"type": "STRING", "description": "URL to read"} }, "required": ["url"] } },
+            { "name": "read_artifact", "description": "Read current resume HTML.", "parameters": { "type": "OBJECT", "properties": {} } },
+            { "name": "edit_artifact", "description": "Surgical search-and-replace edit.", "parameters": { "type": "OBJECT", "properties": { "search": {"type": "STRING", "description": "Exact text to find"}, "replace": {"type": "STRING", "description": "New text"} }, "required": ["search", "replace"] } },
+            { "name": "render_resume", "description": "Update CV HTML.", "parameters": { "type": "OBJECT", "properties": { "html": {"type": "STRING", "description": "Full HTML code"} }, "required": ["html"] } },
+            { "name": "suggest_options", "description": "User options.", "parameters": { "type": "OBJECT", "properties": { "options": { "type": "ARRAY", "items": {"type": "STRING"}, "description": "Option labels" }, "question": {"type": "STRING", "description": "Question to user"} }, "required": ["options", "question"] } },
+            { "name": "update_internal_notes", "description": "Update notes.", "parameters": { "type": "OBJECT", "properties": { "notes": {"type": "STRING", "description": "Consolidated data"} }, "required": ["notes"] } }
         ]
     }])
 }
@@ -134,7 +134,7 @@ fn tools_gemini() -> Value {
 
 async fn call_gemini(settings: &AppSettings, sys: &str, history: &[HistoryMessage]) -> Result<LlmResponse, String> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(90))
         .no_gzip()
         .no_deflate()
         .no_brotli()
@@ -146,7 +146,7 @@ async fn call_gemini(settings: &AppSettings, sys: &str, history: &[HistoryMessag
         let role = if m.role == "user" { "user" } else { "model" };
         json!({ "role": role, "parts": [{"text": &m.content}] })
     }).collect();
-    let body = json!({ "contents": contents, "systemInstruction": { "parts": [{"text": sys}] }, "tools": tools_gemini() });
+    let body = json!({ "contents": contents, "system_instruction": { "parts": [{"text": sys}] }, "tools": tools_gemini() });
     let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
     let content_length = body_str.len();
 
@@ -311,7 +311,7 @@ pub async fn generate_resume(
     language: String,
     has_photo: Option<bool>,
 ) -> Result<LlmResponse, String> {
-    let settings = get_settings(app);
+    let settings = load_settings_raw(&app);
     let notes_str = notes.as_deref().unwrap_or("No notes yet.");
     let photo_instr = if has_photo.unwrap_or(false) {
         "User provided a photo. Use <img src=\"__PROFILE_PHOTO__\" alt=\"Profile\">."
@@ -367,7 +367,28 @@ Current context:
 }
 
 #[tauri::command]
-pub async fn fetch_models(provider: String, base_url: String, api_key: String) -> Result<Vec<String>, String> {
+pub async fn fetch_image_base64(url: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let content_type = resp.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .split(';').next().unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", content_type, b64))
+}
+
+#[tauri::command]
+pub async fn fetch_models(app: tauri::AppHandle, provider: String, base_url: String, api_key: String) -> Result<Vec<String>, String> {
+    let api_key = crate::settings::resolve_api_key(&app, &provider, &api_key);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .no_gzip()

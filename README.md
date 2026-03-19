@@ -2,6 +2,22 @@
 
 SlothCV is a powerful AI-driven resume builder desktop application, built with Tauri and React. It allows users to chat with an AI career consultant to generate and refine professional resumes in real-time as high-quality HTML/CSS.
 
+## Screenshots
+
+<div align="center">
+  <img src="screenshots/01-welcome.png" width="45%" alt="Welcome Screen" />
+  <img src="screenshots/02-generating.png" width="45%" alt="AI Generating" />
+  <br />
+  <img src="screenshots/03-result-with-preview.png" width="45%" alt="CV Result" />
+  <img src="screenshots/04-editing.png" width="45%" alt="Surgical Editing" />
+  <br />
+  <img src="screenshots/05-redesigned.png" width="45%" alt="Redesigned CV" />
+  <img src="screenshots/06-settings.png" width="45%" alt="Settings and API Config" />
+  <br />
+  <img src="screenshots/07-light-mode.png" width="45%" alt="Light Mode Support" />
+  <img src="screenshots/09-with-photo.png" width="45%" alt="CV with Profile Photo" />
+</div>
+
 ## Key Features
 
 - **Multi-Provider AI Support**: Configure and switch between multiple AI providers (Google Gemini, DeepSeek, OpenAI, Groq, OpenRouter, Ollama, etc.) with saved API keys for each.

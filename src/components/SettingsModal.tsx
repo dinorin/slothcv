@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { X, Save, Key, Link, Tag, Moon, Sun, RefreshCw, AlertCircle, ChevronDown, Loader2, Settings, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
-import { AppSettings } from '../types';
+import { AppSettings, MASKED_KEY } from '../types';
 import { getSettings, saveSettings } from '../services/settings';
 import { listSessions, deleteSession } from '../services/storage';
 import { cn } from '../lib/utils';
@@ -54,7 +54,8 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
   function doFetch(provider: string, base_url: string, api_key: string) {
     const def = PROVIDERS.find((p) => p.id === provider);
     if (!def) return;
-    if (def.needs_key && !api_key.trim()) return;
+    // Allow fetch when key is masked (backend will resolve); block only when truly empty
+    if (def.needs_key && !api_key.trim() && api_key !== MASKED_KEY) return;
     if (provider !== 'gemini' && !base_url.trim()) return;
 
     setLoadingModels(true);
@@ -280,12 +281,16 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                     </label>
                     <input
                       type="password"
-                      value={currentTabConfig.api_key}
+                      value={currentTabConfig.api_key === MASKED_KEY ? '' : currentTabConfig.api_key}
                       onChange={(e) => {
                         updateConfig(activeTab, { api_key: e.target.value });
                         scheduleFetch(activeTab, currentTabConfig.base_url, e.target.value);
                       }}
-                      placeholder={providerDef.needs_key ? (providerDef.key_placeholder ?? t.apiKeyPlaceholder) : t.optionalLocal}
+                      placeholder={
+                        currentTabConfig.api_key === MASKED_KEY
+                          ? '•••••••••••• (configured — type to replace)'
+                          : providerDef.needs_key ? (providerDef.key_placeholder ?? t.apiKeyPlaceholder) : t.optionalLocal
+                      }
                       className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
                     />
                   </div>
@@ -318,7 +323,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                           type="text"
                           value={currentTabConfig.model}
                           onChange={(e) => updateConfig(activeTab, { model: e.target.value })}
-                          placeholder={loadingModels ? t.fetchModels : providerDef.needs_key && !currentTabConfig.api_key ? t.enterKeyToLoad : t.modelNamePlaceholder}
+                          placeholder={loadingModels ? t.fetchModels : providerDef.needs_key && !currentTabConfig.api_key && currentTabConfig.api_key !== MASKED_KEY ? t.enterKeyToLoad : t.modelNamePlaceholder}
                           className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
                         />
                       )}
