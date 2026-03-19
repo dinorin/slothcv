@@ -12,6 +12,9 @@ pub struct StoredMessage {
     #[serde(default)]
     #[serde(rename = "isResumeUpdate")]
     pub is_resume_update: Option<bool>,
+    #[serde(default)]
+    #[serde(rename = "isError")]
+    pub is_error: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

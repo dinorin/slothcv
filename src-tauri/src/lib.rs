@@ -23,6 +23,8 @@ pub fn run() {
             app_ready,
             llm::generate_resume,
             llm::fetch_models,
+            llm::web_search,
+            llm::fetch_web_content,
             settings::get_settings,
             settings::save_settings,
             storage::save_session,

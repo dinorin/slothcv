@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { MessageSquare, Plus, Trash2, Settings, FileDown, Eye, EyeOff, ChevronRight, ImagePlus, X, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { MessageSquare, Plus, Trash2, Settings, FileDown, Eye, EyeOff, ChevronRight, ImagePlus, X, ZoomIn, ZoomOut, Maximize, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import ReactMarkdown from 'react-markdown';
@@ -59,6 +59,7 @@ export default function App() {
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -66,6 +67,7 @@ export default function App() {
 
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   const showToast = useCallback((text: string, type: 'info' | 'success' | 'error' = 'info') => {
     setToastMsg({ text, type });
@@ -160,6 +162,12 @@ export default function App() {
     handleNewChat();
   };
 
+  const handleCopy = (text: string, idx: number) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 2000);
+  };
+
 
   // ── Debounced auto-save ───────────────────────────────────────────────────
   const persistSession = useCallback(
@@ -235,9 +243,12 @@ export default function App() {
     setMessages(updatedMessages);
     setIsLoading(true);
 
-    // Build history: skip initial welcome AI message for history
+    // Build history: limit to last 15 valid messages
+    const MAX_HISTORY = 15;
     const historyToSend: HistoryMessage[] = updatedMessages
+      .filter(m => !m.isError) // skip system/error messages
       .slice(1) // skip welcome
+      .slice(-MAX_HISTORY)
       .map(m => ({ role: m.role, content: m.content }));
 
     try {
@@ -249,6 +260,7 @@ export default function App() {
         notes,
         language,
         activePhoto ?? undefined,
+        (status) => setAgentStatus(status),
       );
 
       // Update title from first user message
@@ -270,21 +282,32 @@ export default function App() {
       }
     } catch (e: any) {
       const errMsg = String(e);
-      if (errMsg.toLowerCase().includes('api key')) {
+      console.error('LLM Error:', errMsg);
+      
+      const isApiKeyError = 
+        errMsg.toLowerCase().includes('api key') || 
+        errMsg.toLowerCase().includes('mã khóa api') ||
+        errMsg.toLowerCase().includes('api_key') ||
+        errMsg.includes('401') ||
+        errMsg.includes('403');
+
+      if (isApiKeyError) {
         setMessages(prev => [
           ...prev, 
           { 
             role: 'ai', 
             content: t.apiKeyMissing,
-            options: [t.openSettings] // Use existing options system to render the button
+            options: [t.openSettings],
+            isError: true
           }
         ]);
       } else {
         setError(errMsg);
-        setMessages(prev => [...prev, { role: 'ai', content: `${t.errorLabel}: ${errMsg}` }]);
+        setMessages(prev => [...prev, { role: 'ai', content: `${t.errorLabel}: ${errMsg}`, isError: true }]);
       }
     } finally {
       setIsLoading(false);
+      setAgentStatus(null);
     }
   };
 
@@ -578,11 +601,28 @@ export default function App() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-6 py-6 md:px-12 lg:px-24 space-y-6">
             {messages.map((msg, idx) => (
-              <div key={idx} className={cn('flex flex-col max-w-3xl mx-auto', msg.role === 'user' ? 'items-end' : 'items-start')}>
+              <div key={idx} className={cn('flex flex-col max-w-3xl mx-auto group', msg.role === 'user' ? 'items-end' : 'items-start')}>
                 {msg.role === 'ai' ? (
-                  <div className="w-full space-y-3">
-                    {/* Flat AI Message */}
-                    <div className="text-[14px] leading-relaxed text-gray-800 dark:text-gray-200">
+                  <div className="w-full space-y-3 relative group">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-5 h-5 rounded-md bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center">
+                        <img src={appIcon} alt="AI" className="w-3.5 h-3.5 invert dark:invert-0" />
+                      </div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Sloth AI Agent</span>
+                      
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCopy(msg.content, idx); }}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all ml-auto"
+                        title={t.copy}
+                      >
+                        {copiedIdx === idx ? <span className="text-[10px] font-bold text-green-500 uppercase">{t.copied}</span> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    <div 
+                      className="text-[14px] leading-relaxed text-gray-800 dark:text-gray-200 pl-7 cursor-pointer hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 rounded-lg py-1 transition-colors"
+                      onClick={() => handleCopy(msg.content, idx)}
+                    >
                       <ReactMarkdown
                         components={{
                           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
@@ -624,9 +664,9 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  <div className="max-w-[85%] space-y-2">
+                  <div className="max-w-[85%] space-y-2 relative group">
                     {msg.photo && (
-                      <div className="flex justify-end mb-2">
+                      <div className="flex justify-end mb-2 pl-7">
                         <img
                           src={msg.photo}
                           alt="Attached"
@@ -635,8 +675,20 @@ export default function App() {
                       </div>
                     )}
                     {msg.content && msg.content !== '(Photo attached)' && (
-                      <div className="bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-tr-sm px-4 py-2.5 text-[14px] leading-relaxed shadow-sm">
-                        {msg.content}
+                      <div className="flex items-start gap-2 justify-end">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCopy(msg.content, idx); }}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-all shrink-0 mt-1"
+                          title={t.copy}
+                        >
+                          {copiedIdx === idx ? <span className="text-[10px] font-bold text-green-500 uppercase">{t.copied}</span> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                        <div 
+                          className="bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-zinc-100 rounded-2xl rounded-tr-sm px-4 py-2.5 text-[14px] leading-relaxed shadow-sm cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                          onClick={() => handleCopy(msg.content, idx)}
+                        >
+                          {msg.content}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -662,10 +714,21 @@ export default function App() {
 
             {isLoading && (
               <div className="flex justify-start max-w-3xl mx-auto w-full">
-                <div className="flex gap-1.5 items-center py-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:0ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:150ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:300ms]" />
+                <div className="flex flex-col gap-2 py-2">
+                  <div className="flex gap-1.5 items-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:0ms]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:150ms]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-bounce [animation-delay:300ms]" />
+                  </div>
+                  {agentStatus && (
+                    <motion.p 
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 italic"
+                    >
+                      {agentStatus}
+                    </motion.p>
+                  )}
                 </div>
               </div>
             )}

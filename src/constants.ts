@@ -58,7 +58,9 @@ export const TRANSLATIONS = {
     restore: "Khôi phục",
     maximize: "Phóng to",
     minimize: "Thu nhỏ",
-    errorLabel: "Lỗi"
+    errorLabel: "Lỗi",
+    copy: "Sao chép",
+    copied: "Đã chép"
   },
   en: {
     welcome: "Hi! I'm **SlothCV** — your personal career consultant.\n\nI won't ask you to fill out a form. Instead, we'll have a real conversation so I can understand your professional story — then I'll craft a resume that actually stands out.\n\nTo get started: **What role are you targeting, and where are you in your career right now?**",
@@ -117,7 +119,9 @@ export const TRANSLATIONS = {
     restore: "Restore",
     maximize: "Maximize",
     minimize: "Minimize",
-    errorLabel: "Error"
+    errorLabel: "Error",
+    copy: "Copy",
+    copied: "Copied"
   },
   fr: {
     welcome: "Bonjour ! Je suis **SlothCV** — votre consultant carrière personnel.\n\nJe ne vous demanderai pas de remplir un formulaire. Nous allons avoir une vraie conversation pour comprendre votre parcours, puis je créerai un CV qui se démarque vraiment.\n\nPour commencer : **Quel poste visez-vous et où en êtes-vous trong votre carrière ?**",

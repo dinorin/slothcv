@@ -1,10 +1,84 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::AppHandle;
+use std::time::Duration;
 
 use crate::settings::{get_settings, AppSettings};
 
-// ─── Response types sent back to the frontend ────────────────────────────────
+// ─── Web Search & Scraper Implementation ──────────────────────────────────────
+
+#[tauri::command]
+pub async fn web_search(query: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let url = format!("https://duckduckgo.com/html/?q={}", urlencoding::encode(&query));
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let html = resp.text().await.map_err(|e| e.to_string())?;
+
+    let mut results = Vec::new();
+    let parts: Vec<&str> = html.split("result__snippet").collect();
+    for (i, part) in parts.iter().skip(1).take(5).enumerate() {
+        let snippet = part.split('>').nth(1).and_then(|s| s.split('<').next()).unwrap_or("");
+        if !snippet.is_empty() {
+            results.push(format!("{}. {}", i + 1, snippet.trim()));
+        }
+    }
+
+    if results.is_empty() {
+        Ok("No results found. Try a different query.".to_string())
+    } else {
+        Ok(results.join("\n"))
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_web_content(url: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let html = resp.text().await.map_err(|e| e.to_string())?;
+
+    let mut clean_text = String::new();
+    let mut in_script = false;
+    let mut in_style = false;
+    let mut tag_buffer = String::new();
+    let mut is_tag = false;
+
+    for c in html.chars() {
+        if c == '<' { is_tag = true; tag_buffer.clear(); continue; }
+        if c == '>' {
+            is_tag = false;
+            let tag = tag_buffer.to_lowercase();
+            if tag == "script" || tag.starts_with("script ") { in_script = true; }
+            else if tag == "/script" { in_script = false; }
+            else if tag == "style" || tag.starts_with("style ") { in_style = true; }
+            else if tag == "/style" { in_style = false; }
+            else if tag == "p" || tag == "br" || tag == "div" || tag == "h1" || tag == "h2" || tag == "h3" || tag == "li" {
+                clean_text.push('\n');
+            }
+            continue;
+        }
+        if is_tag { tag_buffer.push(c); } 
+        else if !in_script && !in_style { clean_text.push(c); }
+    }
+
+    let final_text = clean_text.split_whitespace().collect::<Vec<&str>>().join(" ");
+    if final_text.len() > 8000 {
+        Ok(format!("{}... [Truncated due to length]", &final_text[..8000]))
+    } else {
+        Ok(final_text)
+    }
+}
+
+// ─── Response types ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionCall {
@@ -26,448 +100,164 @@ pub struct LlmResponse {
     pub token_usage: TokenUsage,
 }
 
-// ─── Tool declarations ────────────────────────────────────────────────────────
+// ─── Tool declarations ───────────────────────────────────────────────────────
 
-/// OpenAI-compatible tools format (also used by most local LLM servers)
 fn tools_openai() -> Value {
     json!([
-        {
-            "type": "function",
-            "function": {
-                "name": "render_resume",
-                "description": "Create or update the CV by outputting a complete self-contained HTML document with embedded CSS.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "html": {
-                            "type": "string",
-                            "description": "Complete HTML document with all styles embedded."
-                        }
-                    },
-                    "required": ["html"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "suggest_options",
-                "description": "Provide multiple-choice options for the user to select from.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "options": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "A list of 2-4 short options."
-                        },
-                        "question": {
-                            "type": "string",
-                            "description": "The question to ask alongside the options."
-                        }
-                    },
-                    "required": ["options", "question"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_internal_notes",
-                "description": "Update the AI's internal scratchpad/notes.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "notes": {"type": "string"}
-                    },
-                    "required": ["notes"]
-                }
-            }
-        }
+        { "type": "function", "function": { "name": "web_search", "description": "Search the web for info.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] } } },
+        { "type": "function", "function": { "name": "fetch_web_content", "description": "Get webpage text.", "parameters": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } } },
+        { "type": "function", "function": { "name": "render_resume", "description": "Create/update CV HTML.", "parameters": { "type": "object", "properties": { "html": { "type": "string" } }, "required": ["html"] } } },
+        { "type": "function", "function": { "name": "suggest_options", "description": "Provide user options.", "parameters": { "type": "object", "properties": { "options": { "type": "array", "items": {"type": "string"} }, "question": {"type": "string"} }, "required": ["options", "question"] } } },
+        { "type": "function", "function": { "name": "update_internal_notes", "description": "Update notes.", "parameters": { "type": "object", "properties": { "notes": {"type": "string"} }, "required": ["notes"] } } }
     ])
 }
 
-/// Gemini REST API tool format (uses uppercase type names)
 fn tools_gemini() -> Value {
     json!([{
         "functionDeclarations": [
-            {
-                "name": "render_resume",
-                "description": "Create or update the CV by outputting a complete self-contained HTML document.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "html": {"type": "STRING"}
-                    },
-                    "required": ["html"]
-                }
-            },
-            {
-                "name": "suggest_options",
-                "description": "Provide multiple-choice options for the user.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "options": {
-                            "type": "ARRAY",
-                            "items": {"type": "STRING"}
-                        },
-                        "question": {"type": "STRING"}
-                    },
-                    "required": ["options", "question"]
-                }
-            },
-            {
-                "name": "update_internal_notes",
-                "description": "Update the AI's internal scratchpad.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "notes": {"type": "STRING"}
-                    },
-                    "required": ["notes"]
-                }
-            }
+            { "name": "web_search", "description": "Search web.", "parameters": { "type": "OBJECT", "properties": { "query": {"type": "STRING"} }, "required": ["query"] } },
+            { "name": "fetch_web_content", "description": "Get web text.", "parameters": { "type": "OBJECT", "properties": { "url": {"type": "STRING"} }, "required": ["url"] } },
+            { "name": "render_resume", "description": "Update CV HTML.", "parameters": { "type": "OBJECT", "properties": { "html": {"type": "STRING"} }, "required": ["html"] } },
+            { "name": "suggest_options", "description": "User options.", "parameters": { "type": "OBJECT", "properties": { "options": { "type": "ARRAY", "items": {"type": "STRING"} }, "question": {"type": "STRING"} }, "required": ["options", "question"] } },
+            { "name": "update_internal_notes", "description": "Update notes.", "parameters": { "type": "OBJECT", "properties": { "notes": {"type": "STRING"} }, "required": ["notes"] } }
         ]
     }])
 }
 
 // ─── API callers ──────────────────────────────────────────────────────────────
 
-async fn call_gemini(
-    settings: &AppSettings,
-    system_instruction: &str,
-    history: &[HistoryMessage],
-) -> Result<LlmResponse, String> {
+async fn call_gemini(settings: &AppSettings, sys: &str, history: &[HistoryMessage]) -> Result<LlmResponse, String> {
     let client = reqwest::Client::new();
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        settings.llm.model, settings.llm.api_key
-    );
-
-    // Build contents from history — Gemini uses "user"/"model"
+    let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", settings.llm.model, settings.llm.api_key);
     let contents: Vec<Value> = history.iter().map(|m| {
         let role = if m.role == "user" { "user" } else { "model" };
         json!({ "role": role, "parts": [{"text": &m.content}] })
     }).collect();
-
-    let body = json!({
-        "contents": contents,
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
-        },
-        "tools": tools_gemini()
-    });
-
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {e}"))?;
-
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("Failed to read response: {e}"))?;
-    let json: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("Invalid JSON from Gemini (HTTP {status}): {e}\nBody: {}", &text[..text.len().min(300)]))?;
-
-    if let Some(err) = json.get("error") {
-        return Err(format!("Gemini API error: {err}"));
-    }
-
-    let mut text: Option<String> = None;
-    let mut function_calls: Vec<FunctionCall> = Vec::new();
-
-    if let Some(candidates) = json["candidates"].as_array() {
-        if let Some(candidate) = candidates.first() {
-            if let Some(parts) = candidate["content"]["parts"].as_array() {
-                for part in parts {
-                    if let Some(t) = part["text"].as_str() {
-                        if !t.is_empty() {
-                            text = Some(t.to_string());
-                        }
-                    }
-                    if let Some(fc) = part.get("functionCall") {
-                        let name = fc["name"].as_str().unwrap_or("").to_string();
-                        let args = fc["args"].clone();
-                        function_calls.push(FunctionCall { name, args });
-                    }
-                }
+    let body = json!({ "contents": contents, "systemInstruction": { "parts": [{"text": sys}] }, "tools": tools_gemini() });
+    let resp = client.post(&url).json(&body).send().await.map_err(|e| e.to_string())?;
+    let json: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") { return Err(format!("Gemini API error: {err}")); }
+    let mut text = None;
+    let mut function_calls = Vec::new();
+    if let Some(parts) = json["candidates"][0]["content"]["parts"].as_array() {
+        for part in parts {
+            if let Some(t) = part["text"].as_str() { if !t.is_empty() { text = Some(t.to_string()); } }
+            if let Some(fc) = part.get("functionCall") {
+                let name = fc["name"].as_str().unwrap_or("").to_string();
+                function_calls.push(FunctionCall { name, args: fc["args"].clone() });
             }
         }
     }
-
     let usage = &json["usageMetadata"];
     let token_usage = TokenUsage {
         prompt: usage["promptTokenCount"].as_i64().unwrap_or(0),
         completion: usage["candidatesTokenCount"].as_i64().unwrap_or(0),
         total: usage["totalTokenCount"].as_i64().unwrap_or(0),
     };
-
     Ok(LlmResponse { text, function_calls, token_usage })
 }
 
-async fn call_openai_compat(
-    settings: &AppSettings,
-    system_instruction: &str,
-    history: &[HistoryMessage],
-) -> Result<LlmResponse, String> {
+async fn call_openai_compat(settings: &AppSettings, sys: &str, history: &[HistoryMessage]) -> Result<LlmResponse, String> {
     let client = reqwest::Client::new();
-    let base = settings.llm.base_url.trim_end_matches('/');
-    let url = format!("{base}/chat/completions");
-
-    let mut req = client
-        .post(&url)
-        .header("Content-Type", "application/json");
-
-    if !settings.llm.api_key.is_empty() {
-        req = req.header(
-            "Authorization",
-            format!("Bearer {}", settings.llm.api_key),
-        );
-    }
-
-    // Build messages: system prompt + full conversation history
-    let mut messages = vec![json!({"role": "system", "content": system_instruction})];
+    let url = format!("{}/chat/completions", settings.llm.base_url.trim_end_matches('/'));
+    let mut req = client.post(&url).header("Content-Type", "application/json");
+    if !settings.llm.api_key.is_empty() { req = req.header("Authorization", format!("Bearer {}", settings.llm.api_key)); }
+    let mut messages = vec![json!({"role": "system", "content": sys})];
     for m in history {
         let role = if m.role == "user" { "user" } else { "assistant" };
         messages.push(json!({"role": role, "content": m.content}));
     }
-
-    let body = json!({
-        "model": settings.llm.model,
-        "messages": messages,
-        "tools": tools_openai(),
-        "tool_choice": "auto"
-    });
-
-    let resp = req
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {e}"))?;
-
-    let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("Failed to read response: {e}"))?;
-    let json: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("Invalid JSON from API (HTTP {status}): {e}\nBody: {}", &text[..text.len().min(300)]))?;
-
-    if let Some(err) = json.get("error") {
-        return Err(format!("API error: {err}"));
-    }
-
-    let mut text: Option<String> = None;
-    let mut function_calls: Vec<FunctionCall> = Vec::new();
-
-    if let Some(choices) = json["choices"].as_array() {
-        if let Some(choice) = choices.first() {
-            let msg = &choice["message"];
-
-            if let Some(content) = msg["content"].as_str() {
-                if !content.is_empty() {
-                    text = Some(content.to_string());
-                }
-            }
-
-            if let Some(tool_calls) = msg["tool_calls"].as_array() {
-                for tc in tool_calls {
-                    let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
-                    let args_str = tc["function"]["arguments"].as_str().unwrap_or("{}");
-                    let args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
-                    function_calls.push(FunctionCall { name, args });
-                }
-            }
+    let body = json!({ "model": settings.llm.model, "messages": messages, "tools": tools_openai(), "tool_choice": "auto" });
+    let resp = req.json(&body).send().await.map_err(|e| e.to_string())?;
+    let json: Value = resp.json().await.map_err(|e| e.to_string())?;
+    if let Some(err) = json.get("error") { return Err(format!("API error: {err}")); }
+    let msg = &json["choices"][0]["message"];
+    let text = msg["content"].as_str().map(|s| s.to_string());
+    let mut function_calls = Vec::new();
+    if let Some(tool_calls) = msg["tool_calls"].as_array() {
+        for tc in tool_calls {
+            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+            let args: Value = serde_json::from_str(tc["function"]["arguments"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
+            function_calls.push(FunctionCall { name, args });
         }
     }
-
     let usage = &json["usage"];
     let token_usage = TokenUsage {
         prompt: usage["prompt_tokens"].as_i64().unwrap_or(0),
         completion: usage["completion_tokens"].as_i64().unwrap_or(0),
         total: usage["total_tokens"].as_i64().unwrap_or(0),
     };
-
     Ok(LlmResponse { text, function_calls, token_usage })
 }
 
-// ─── Chat history ─────────────────────────────────────────────────────────────
-
 #[derive(Debug, Serialize, Deserialize)]
-pub struct HistoryMessage {
-    pub role: String,    // "user" or "ai"
-    pub content: String,
-}
-
-// ─── Tauri command ────────────────────────────────────────────────────────────
+pub struct HistoryMessage { pub role: String, pub content: String }
 
 #[tauri::command]
 pub async fn generate_resume(
     app: AppHandle,
     history: Vec<HistoryMessage>,
-    current_data: Option<Value>,
+    _current_data: Option<Value>,
     notes: Option<String>,
     language: String,
     has_photo: Option<bool>,
 ) -> Result<LlmResponse, String> {
     let settings = get_settings(app);
-
     let notes_str = notes.as_deref().unwrap_or("No notes yet.");
-    let has_photo = has_photo.unwrap_or(false);
-
-    let system_instruction = format!(
-        r#"You are SlothCV — a career consultant and world-class CV designer. You chat with users to learn their story, then design stunning resumes using full HTML/CSS freedom.
-
-LANGUAGE: Always respond in {language}. Never switch languages.
-
-━━━ HOW YOU WORK ━━━
-1. GATHER — ask about their target role, experience, skills. Max 2 questions at a time.
-2. BUILD EARLY — as soon as you have name + role + 1 experience, call render_resume. Don't wait.
-3. KEEP IMPROVING — update the CV as you learn more. Call render_resume again to update.
-4. IF ASKED TO BUILD NOW — do it immediately with whatever info you have.
-
-━━━ CV CONTENT RULES ━━━
-• Bullet points: [Action verb] + [what] + [measurable result]
-  ✓ "Cut API latency 40% by switching to Redis, serving 2M daily users"
-  ✗ "Improved performance"
-• Always probe for metrics: %, headcount, revenue, users, timelines
-
-━━━ HTML/CSS DESIGN RULES ━━━
-When calling render_resume, output a COMPLETE, self-contained HTML document:
-• Page size: exactly 794px wide × 1123px tall (A4 at 96dpi)
-• All styles in a <style> block — no external CSS files
-• Do NOT use Google Fonts. The font 'Inter' is already injected locally. Just use `font-family: 'Inter', sans-serif;`
-• Do NOT use FontAwesome or external icon libraries. You MUST use raw inline SVG code for all icons (e.g., `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">...</svg>`). This is critical for PDF export.
-• Use any layout technique: CSS Grid, Flexbox, absolute positioning, multi-column
-• Be bold with design: colored sidebars, full-bleed headers, creative typography
-• Use real data only — no Lorem Ipsum, no placeholders
-• Include @media print {{ ... }} for clean PDF output
-• Body margin: 0; overflow: hidden; so it fits exactly in the preview
-
-Design guidance:
-• Pick an intentional accent color that fits their industry/personality
-• Senior profiles: sophisticated, dense, minimal decoration
-• Creative roles: expressive typography, bold color use
-• Tech roles: clean grid layout, skill tags, dark/light contrast
-• Entry level: spacious, clear hierarchy, highlight education + projects
-
-━━━ CONVERSATION RULES ━━━
-• ALWAYS return a text response (never silent tool calls)
-• Max 2 questions per reply
-• Use suggest_options for any choices the user should make
-• After calling render_resume, briefly describe your design choices
-
-━━━ PROFILE PHOTO ━━━
-{photo_instruction}
-
-━━━ NOTES ━━━
-Use update_internal_notes to track: gathered info, pending questions, target role, key strengths.
-
-CURRENT NOTES: {notes_str}"#,
-        language = language,
-        notes_str = notes_str,
-        photo_instruction = if has_photo {
-            "The user has provided a profile photo. When rendering the CV, place an <img src=\"__PROFILE_PHOTO__\" alt=\"Profile\"> with appropriate size and shape (circular border-radius for modern layouts). The placeholder __PROFILE_PHOTO__ will be automatically replaced with the actual image."
-        } else {
-            "No profile photo provided. Do not include an <img> placeholder for a photo."
-        },
-    );
-
-    // Validate config before calling API
-    if settings.llm.model.trim().is_empty() {
-        return Err("No model selected. Please open Settings and choose a model.".into());
-    }
-    let api_key = settings.llm.api_key.trim().to_string();
-    if settings.llm.provider == "gemini" && api_key.is_empty() {
-        return Err("Gemini API key is missing. Please open Settings and enter your API key.".into());
-    }
-    if settings.llm.provider != "gemini" && settings.llm.base_url.trim().is_empty() {
-        return Err("Base URL is missing. Please open Settings and set the provider URL.".into());
-    }
-
-    let settings = crate::settings::AppSettings {
-        llm: crate::settings::LlmSettings {
-            api_key: api_key,
-            ..settings.llm
-        },
-        ..settings
+    let photo_instr = if has_photo.unwrap_or(false) {
+        "User provided a photo. Use <img src=\"__PROFILE_PHOTO__\" alt=\"Profile\">."
+    } else {
+        "No photo provided. Don't use img placeholder."
     };
 
-    match settings.llm.provider.as_str() {
-        "gemini" => call_gemini(&settings, &system_instruction, &history).await,
-        _ => call_openai_compat(&settings, &system_instruction, &history).await,
+    let sys = format!(
+        r#"You are SlothCV — an AI agent and resume designer. Respond in {language}.
+        1. GATHER: ask target role/skills. 2. RESEARCH: use `web_search`/`fetch_web_content`. 
+        3. DESIGN: use `render_resume` (A4, Inter font, inline SVG icons). 4. NOTES: use `update_internal_notes`.
+        Current notes: {notes_str}. {photo_instr}"#,
+        language = language, notes_str = notes_str, photo_instr = photo_instr
+    );
+
+    if settings.llm.model.trim().is_empty() { return Err("No model selected. Open Settings.".into()); }
+    let provider = settings.llm.provider.to_lowercase();
+    let api_key = settings.llm.api_key.trim();
+
+    if provider == "gemini" && api_key.is_empty() { return Err("Gemini API key missing.".into()); }
+    if provider != "ollama" && provider != "lmstudio" && provider != "custom" && api_key.is_empty() {
+        return Err(format!("API key for {} is missing.", settings.llm.provider).into());
+    }
+    if provider != "gemini" && settings.llm.base_url.trim().is_empty() { return Err("Base URL missing.".into()); }
+
+    match provider.as_str() {
+        "gemini" => call_gemini(&settings, &sys, &history).await,
+        _ => call_openai_compat(&settings, &sys, &history).await,
     }
 }
 
 #[tauri::command]
-pub async fn fetch_models(
-    provider: String,
-    base_url: String,
-    api_key: String,
-) -> Result<Vec<String>, String> {
+pub async fn fetch_models(provider: String, base_url: String, api_key: String) -> Result<Vec<String>, String> {
     let client = reqwest::Client::new();
     match provider.as_str() {
         "gemini" => {
-            if api_key.is_empty() {
-                return Ok(vec![]);
-            }
-            let url = format!(
-                "https://generativelanguage.googleapis.com/v1beta/models?key={}&pageSize=50",
-                api_key
-            );
-            let resp = client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-            let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-            if let Some(err) = json.get("error") {
-                return Err(format!("API error: {err}"));
-            }
-            let models: Vec<String> = json["models"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|m| {
-                    m["name"].as_str().map(|s| s.trim_start_matches("models/").to_string())
-                })
-                .filter(|n| {
-                    n.contains("gemini")
-                        && !n.contains("embedding")
-                        && !n.contains("aqa")
-                        && !n.contains("imagen")
-                        && !n.contains("tts")
-                })
+            if api_key.is_empty() { return Ok(vec![]); }
+            let url = format!("https://generativelanguage.googleapis.com/v1beta/models?key={}&pageSize=50", api_key);
+            let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+            let json: Value = resp.json().await.map_err(|e| e.to_string())?;
+            let models: Vec<String> = json["models"].as_array().unwrap_or(&vec![]).iter()
+                .filter_map(|m| m["name"].as_str().map(|s| s.trim_start_matches("models/").to_string()))
+                .filter(|n| n.contains("gemini") && !n.contains("embedding") && !n.contains("aqa"))
                 .collect();
             Ok(models)
         }
         _ => {
-            // All non-Gemini providers use OpenAI-compatible /models endpoint
-            if base_url.is_empty() {
-                return Ok(vec![]);
-            }
-            let base = base_url.trim_end_matches('/');
-            let url = format!("{base}/models");
-            let mut req = client.get(&url);
-            if !api_key.is_empty() {
-                req = req.header("Authorization", format!("Bearer {}", api_key));
-            }
+            if base_url.is_empty() { return Ok(vec![]); }
+            let mut req = client.get(format!("{}/models", base_url.trim_end_matches('/')));
+            if !api_key.is_empty() { req = req.header("Authorization", format!("Bearer {}", api_key)); }
             let resp = req.send().await.map_err(|e| e.to_string())?;
-            let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-            if let Some(err) = json.get("error") {
-                return Err(format!("API error: {err}"));
-            }
-            // Handle both {data:[]} (OpenAI) and {models:[]} (some providers) formats
-            let models_arr = json["data"]
-                .as_array()
-                .or_else(|| json["models"].as_array());
-            let models: Vec<String> = models_arr
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|m| {
-                    m["id"].as_str()
-                        .or_else(|| m["name"].as_str())
-                        .map(|s| s.to_string())
-                })
+            let json: Value = resp.json().await.map_err(|e| e.to_string())?;
+            let models_arr = json["data"].as_array().or_else(|| json["models"].as_array());
+            let models: Vec<String> = models_arr.unwrap_or(&vec![]).iter()
+                .filter_map(|m| m["id"].as_str().or_else(|| m["name"].as_str()).map(|s| s.to_string()))
                 .collect();
             Ok(models)
         }

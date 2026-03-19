@@ -98,6 +98,7 @@ export interface ChatMessage {
   options?: string[];
   photo?: string; // base64 data URI, only on user messages
   isResumeUpdate?: boolean; // If true, this AI message came with a resume update
+  isError?: boolean; // If true, this is an error message that should not be sent to history
 }
 
 export type Language = "vi" | "en" | "fr" | "de" | "ja" | "ko" | "zh";
