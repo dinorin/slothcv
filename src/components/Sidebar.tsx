@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, PanelLeftClose } from 'lucide-react';
 import { SessionSummary } from '../services/storage';
 import { Language } from '../types';
 import { cn } from '../lib/utils';
@@ -12,6 +12,7 @@ interface Props {
   language: Language;
   t: any;
   onResizeStart: (e: React.MouseEvent) => void;
+  onToggle: () => void;
   onNewChat: () => void;
   onSwitchSession: (id: string) => void;
   onDeleteSession: (id: string, e: React.MouseEvent) => void;
@@ -20,7 +21,7 @@ interface Props {
 
 export default function Sidebar({
   width, isOpen, isResizing, sessions, currentSessionId,
-  language, t, onResizeStart, onNewChat, onSwitchSession,
+  language, t, onResizeStart, onToggle, onNewChat, onSwitchSession,
   onDeleteSession, onLanguageChange,
 }: Props) {
   return (
@@ -32,13 +33,20 @@ export default function Sidebar({
           !isResizing && 'transition-all duration-200',
         )}
       >
-        <div className="px-3 pt-3 pb-2 shrink-0">
+        <div className="px-3 pt-3 pb-2 shrink-0 flex items-center gap-2">
           <button
             onClick={onNewChat}
-            className="flex items-center gap-2 w-full px-3 py-2 rounded-md bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-black text-[12px] font-medium transition-colors"
+            className="flex items-center gap-2 flex-1 min-w-0 px-3 py-2 rounded-md bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-black text-[12px] font-medium transition-colors"
           >
             <Plus className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">{t.newChat}</span>
+          </button>
+          <button
+            onClick={onToggle}
+            className="p-2 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors shrink-0 cursor-pointer"
+            title="Close sidebar"
+          >
+            <PanelLeftClose className="w-4 h-4" />
           </button>
         </div>
 
@@ -95,7 +103,7 @@ export default function Sidebar({
       {isOpen && (
         <div
           onMouseDown={onResizeStart}
-          className="w-1 cursor-col-resize hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors z-20 shrink-0 border-r border-zinc-100 dark:border-zinc-900"
+          className="hidden sm:block w-1 cursor-col-resize hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors z-20 shrink-0 border-r border-zinc-100 dark:border-zinc-900"
         />
       )}
     </>

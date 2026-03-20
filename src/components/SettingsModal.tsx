@@ -19,6 +19,46 @@ interface Props {
 
 import { PROVIDERS } from '../constants';
 
+function ProviderIcon({ domain, color, initials, size, fontSize, rounded = 'rounded-md', shadow = false }: {
+  domain: string | null;
+  color: string;
+  initials: string;
+  size: number;
+  fontSize: number;
+  rounded?: string;
+  shadow?: boolean;
+}) {
+  const [imgFailed, setImgFailed] = React.useState(false);
+  const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
+
+  if (faviconUrl && !imgFailed) {
+    return (
+      <div
+        className={cn('flex items-center justify-center shrink-0 bg-white dark:bg-zinc-800', rounded, shadow && 'shadow-md')}
+        style={{ width: size, height: size }}
+      >
+        <img
+          src={faviconUrl}
+          alt={initials}
+          width={size * 0.6}
+          height={size * 0.6}
+          onError={() => setImgFailed(true)}
+          style={{ objectFit: 'contain' }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn('flex items-center justify-center text-white shrink-0', rounded, shadow && 'shadow-md')}
+      style={{ width: size, height: size, backgroundColor: color, fontSize, fontWeight: 700, letterSpacing: '-0.02em' }}
+    >
+      {initials}
+    </div>
+  );
+}
+
 async function fetchModelsFromApi(provider: string, base_url: string, api_key: string): Promise<string[]> {
   return invoke<string[]>('fetch_models', { provider, baseUrl: base_url, apiKey: api_key });
 }
@@ -170,19 +210,20 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 10 }}
               transition={{ duration: 0.15 }}
-              className="bg-white dark:bg-[#0a0a0a] rounded-2xl shadow-2xl w-full max-w-2xl h-[520px] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
+              className="bg-white dark:bg-[#0a0a0a] rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
+              style={{ maxHeight: 'min(90vh, 600px)', minHeight: 0 }}
             >
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center">
-                    <Settings className="w-4 h-4 text-white dark:text-zinc-900" />
+              <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center shrink-0">
+                    <Settings className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white dark:text-zinc-900" />
                   </div>
-                  <h2 className="text-[14px] font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest">
+                  <h2 className="text-[13px] sm:text-[14px] font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest">
                     {t.settings}
                   </h2>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2">
                   <button
                     onClick={() => {
                       const dark = !settings.dark_mode;
@@ -191,21 +232,21 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                       onDarkModeChange?.(dark);
                       saveSettings(next).catch(console.error);
                     }}
-                    className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors"
+                    className="p-1.5 sm:p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 transition-colors"
                   >
                     {settings.dark_mode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
                   </button>
-                  <button onClick={onClose} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md text-zinc-400 transition-colors">
+                  <button onClick={onClose} className="p-1.5 sm:p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md text-zinc-400 transition-colors">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Body: 2 Columns */}
-              <div className="flex flex-1 overflow-hidden">
-                {/* Left: Provider List */}
-                <div className="w-56 border-r border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20 overflow-y-auto p-2 space-y-1">
-                  <div className="px-3 py-2">
+              {/* Body: horizontal tabs on small, 2-column on sm+ */}
+              <div className="flex flex-col sm:flex-row flex-1 min-h-0 overflow-hidden">
+                {/* Provider List — horizontal scroll on small, vertical sidebar on sm+ */}
+                <div className="flex flex-row sm:flex-col shrink-0 sm:w-44 border-b sm:border-b-0 sm:border-r border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20 overflow-x-auto sm:overflow-y-auto sm:overflow-x-hidden sm:p-2 sm:space-y-1">
+                  <div className="hidden sm:block px-3 py-2 shrink-0">
                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{t.apiProvider}</span>
                   </div>
                   {PROVIDERS.map((p) => {
@@ -222,20 +263,27 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                           doFetch(p.id, cfg.base_url, cfg.api_key);
                         }}
                         className={cn(
-                          'w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all',
-                          isActive 
-                            ? 'bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100' 
-                            : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-zinc-300'
+                          'shrink-0 flex items-center gap-2 text-left transition-all',
+                          /* horizontal (small): pill tab */
+                          'flex-col px-3 py-2.5 sm:flex-row sm:w-full sm:px-3 sm:py-2.5 sm:rounded-xl sm:justify-between',
+                          isActive
+                            ? 'sm:bg-white sm:dark:bg-zinc-800 sm:shadow-sm sm:border sm:border-zinc-200 sm:dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 border-b-2 border-indigo-500 sm:border-b-0'
+                            : 'text-zinc-400 sm:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 sm:hover:bg-zinc-100 sm:dark:hover:bg-zinc-800/50 border-b-2 border-transparent',
                         )}
                       >
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-[12.5px] font-semibold truncate">{p.name}</span>
+                        <ProviderIcon domain={p.domain} color={p.color} initials={p.initials} size={24} fontSize={p.initials.length > 1 ? 7 : 10} />
+                        {/* Name: single line on small (truncated), full on sm */}
+                        <div className="flex flex-col min-w-0 sm:flex-1">
+                          <span className="text-[10px] sm:text-[12.5px] font-semibold truncate max-w-[52px] sm:max-w-none">{p.name.split(' ')[0]}<span className="hidden sm:inline"> {p.name.split(' ').slice(1).join(' ')}</span></span>
                           {isGlobalActive && (
-                            <span className="text-[9px] font-bold text-indigo-500 uppercase">Active Now</span>
+                            <span className="hidden sm:block text-[9px] font-bold text-indigo-500 uppercase">Active Now</span>
                           )}
                         </div>
                         {isConfigured && !isActive && (
-                          <Check className="w-3 h-3 text-green-500 shrink-0" />
+                          <Check className="hidden sm:block w-3 h-3 text-green-500 shrink-0" />
+                        )}
+                        {isGlobalActive && isActive && (
+                          <div className="sm:hidden w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
                         )}
                       </button>
                     );
@@ -243,14 +291,12 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                 </div>
 
                 {/* Right: Config Panel */}
-                <div className="flex-1 overflow-y-auto p-8 space-y-6">
-                  <div className="flex items-center gap-4 mb-2">
-                    <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-xl">
-                      {providerDef.id === 'gemini' ? '💎' : providerDef.local ? '🏠' : '☁️'}
-                    </div>
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 min-h-0">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <ProviderIcon domain={providerDef.domain} color={providerDef.color} initials={providerDef.initials} size={40} fontSize={providerDef.initials.length > 1 ? 12 : 18} rounded="rounded-xl sm:rounded-2xl" shadow />
                     <div>
-                      <h3 className="text-[16px] font-bold text-zinc-900 dark:text-zinc-100">{providerDef.name}</h3>
-                      <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{providerDef.local ? 'Local LLM Server' : 'Cloud API Provider'}</p>
+                      <h3 className="text-[15px] sm:text-[16px] font-bold text-zinc-900 dark:text-zinc-100">{providerDef.name}</h3>
+                      <p className="text-[11px] sm:text-[12px] text-zinc-500 dark:text-zinc-400">{providerDef.local ? 'Local LLM Server' : 'Cloud API Provider'}</p>
                     </div>
                   </div>
 
@@ -268,7 +314,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                           scheduleFetch(activeTab, e.target.value, currentTabConfig.api_key);
                         }}
                         placeholder="http://localhost:11434/v1"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 sm:px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
                       />
                     </div>
                   )}
@@ -291,7 +337,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                           ? '•••••••••••• (configured — type to replace)'
                           : providerDef.needs_key ? (providerDef.key_placeholder ?? t.apiKeyPlaceholder) : t.optionalLocal
                       }
-                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 sm:px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
                     />
                   </div>
 
@@ -313,7 +359,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                         <select
                           value={currentTabConfig.model}
                           onChange={(e) => updateConfig(activeTab, { model: e.target.value })}
-                          className="w-full appearance-none bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-zinc-900 dark:text-zinc-100"
+                          className="w-full appearance-none bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 sm:px-4 py-2.5 text-[13px] font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-zinc-900 dark:text-zinc-100"
                         >
                           <option value="" disabled>{t.selectModel}</option>
                           {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -324,7 +370,7 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
                           value={currentTabConfig.model}
                           onChange={(e) => updateConfig(activeTab, { model: e.target.value })}
                           placeholder={loadingModels ? t.fetchModels : providerDef.needs_key && !currentTabConfig.api_key && currentTabConfig.api_key !== MASKED_KEY ? t.enterKeyToLoad : t.modelNamePlaceholder}
-                          className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                          className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 sm:px-4 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
                         />
                       )}
                       {modelOptions.length > 0 && <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />}
@@ -340,24 +386,24 @@ export default function SettingsModal({ open, onClose, onDarkModeChange, onSaved
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0f0f0f] shrink-0">
+              <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0f0f0f] shrink-0">
                 <button
                   onClick={() => setShowClearConfirm(true)}
                   disabled={saving}
-                  className="px-4 py-2 text-[12px] font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                  className="px-3 sm:px-4 py-2 text-[12px] font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors shrink-0"
                 >
                   {t.clearData}
                 </button>
-                <div className="flex items-center gap-3">
-                  {saveError && <span className="text-[11px] text-red-500 mr-2">{saveError}</span>}
-                  <button onClick={onClose} className="px-4 py-2 text-[12px] font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-colors">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                  {saveError && <span className="text-[11px] text-red-500 truncate">{saveError}</span>}
+                  <button onClick={onClose} className="px-3 sm:px-4 py-2 text-[12px] font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-colors shrink-0">
                     {t.close}
                   </button>
                   <button
                     onClick={handleSave}
                     disabled={saving}
                     className={cn(
-                      'flex items-center gap-2 px-6 py-2 rounded-xl text-[12px] font-bold tracking-wider transition-all shadow-lg active:scale-95',
+                      'flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2 rounded-xl text-[12px] font-bold tracking-wider transition-all shadow-lg active:scale-95 shrink-0',
                       saved ? 'bg-green-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                     )}
                   >

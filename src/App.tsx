@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Eye, EyeOff, Settings, MessageSquare } from 'lucide-react';
+import { Eye, EyeOff, Settings, PanelLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
 import TitleBar from './components/TitleBar';
@@ -35,6 +35,8 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState('');
   const [quickModels, setQuickModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
@@ -78,8 +80,12 @@ export default function App() {
   // Keep handleSendRef in sync so agent playground can call it
   useEffect(() => { llm.handleSendRef.current = llm.handleSend; }, [llm.handleSend]);
 
+  const isSmall = windowWidth < 640;
+
   // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
     invoke('app_ready').catch(() => {});
     const noCtx = (e: MouseEvent) => e.preventDefault();
     document.addEventListener('contextmenu', noCtx);
@@ -88,7 +94,10 @@ export default function App() {
       setAppSettings(s);
       setCurrentModel(s.llm.model);
     }).catch(() => {});
-    return () => document.removeEventListener('contextmenu', noCtx);
+    return () => {
+      document.removeEventListener('contextmenu', noCtx);
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
   useEffect(() => {
@@ -100,12 +109,14 @@ export default function App() {
   const handleNewChat = useCallback(() => {
     llm.stopProcessing();
     session.resetSession();
-  }, [llm.stopProcessing, session.resetSession]);
+    if (isSmall) setSidebarOpen(false);
+  }, [llm.stopProcessing, session.resetSession, isSmall]);
 
   const handleSwitchSession = useCallback(async (id: string) => {
     llm.stopProcessing();
     try { await session.switchToSession(id); } catch (e) { console.error(e); }
-  }, [llm.stopProcessing, session.switchToSession]);
+    if (isSmall) setSidebarOpen(false);
+  }, [llm.stopProcessing, session.switchToSession, isSmall]);
 
   const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -248,9 +259,6 @@ export default function App() {
   return (
     <div className={cn('relative flex flex-col h-screen bg-white dark:bg-[#0a0a0a] text-zinc-900 dark:text-zinc-100 font-sans', darkMode && 'dark')}>
       <TitleBar t={t}>
-        <button onClick={() => setSidebarOpen(p => !p)} title={t.toggleSidebar} className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 transition-colors ml-1">
-          <MessageSquare className="w-4 h-4" />
-        </button>
         <span className="flex-1 text-[12px] font-medium text-zinc-400 dark:text-zinc-500 truncate px-2" data-tauri-drag-region>
           {session.sessionTitle}
         </span>
@@ -315,21 +323,33 @@ export default function App() {
         }}
       />
 
-      <div className="flex flex-1 overflow-hidden pt-10">
+      <div className="flex flex-1 overflow-hidden pt-10 relative">
         <Sidebar
-          width={sidebar.width}
+          width={isSmall ? windowWidth : sidebar.width}
           isOpen={sidebarOpen}
-          isResizing={sidebar.isResizing}
+          isResizing={!isSmall && sidebar.isResizing}
           sessions={session.sessions}
           currentSessionId={session.sessionId}
           language={language}
           t={t}
           onResizeStart={sidebar.startResizing}
+          onToggle={() => setSidebarOpen(p => !p)}
           onNewChat={handleNewChat}
           onSwitchSession={handleSwitchSession}
           onDeleteSession={handleDeleteSession}
           onLanguageChange={setLanguage}
         />
+
+        {/* Floating open button when sidebar is closed */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            title={t.toggleSidebar}
+            className="absolute top-[2.75rem] left-2 z-30 p-1.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer shadow-sm"
+          >
+            <PanelLeft className="w-4 h-4" />
+          </button>
+        )}
 
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden bg-white dark:bg-[#0a0a0a]">
           <MessageList
@@ -372,9 +392,9 @@ export default function App() {
         </div>
 
         <ArtifactPreview
-          width={preview.width}
+          width={isSmall ? windowWidth : preview.width}
           isOpen={isPreviewOpen}
-          isResizing={preview.isResizing}
+          isResizing={!isSmall && preview.isResizing}
           resumeData={session.resumeData}
           t={t}
           onResizeStart={preview.startResizing}

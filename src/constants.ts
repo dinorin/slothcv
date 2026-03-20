@@ -1,14 +1,14 @@
 export const PROVIDERS = [
-  { id: 'gemini',     name: 'Google Gemini',  base_url: '',                                  needs_key: true,  key_placeholder: 'AIza...' },
-  { id: 'openai',     name: 'OpenAI',          base_url: 'https://api.openai.com/v1',         needs_key: true,  key_placeholder: 'sk-...' },
-  { id: 'groq',       name: 'Groq',            base_url: 'https://api.groq.com/openai/v1',    needs_key: true,  key_placeholder: 'gsk_...' },
-  { id: 'openrouter', name: 'OpenRouter',      base_url: 'https://openrouter.ai/api/v1',      needs_key: true,  key_placeholder: 'sk-or-...' },
-  { id: 'mistral',    name: 'Mistral',         base_url: 'https://api.mistral.ai/v1',         needs_key: true,  key_placeholder: 'API key' },
-  { id: 'deepseek',   name: 'DeepSeek',        base_url: 'https://api.deepseek.com/v1',       needs_key: true,  key_placeholder: 'sk-...' },
-  { id: 'together',   name: 'Together AI',     base_url: 'https://api.together.xyz/v1',       needs_key: true,  key_placeholder: 'API key' },
-  { id: 'ollama',     name: 'Ollama (local)',  base_url: 'http://localhost:11434/v1',          needs_key: false, local: true },
-  { id: 'lmstudio',   name: 'LM Studio',       base_url: 'http://localhost:1234/v1',           needs_key: false, local: true },
-  { id: 'custom',     name: 'Custom / Other',  base_url: '',                                  needs_key: false },
+  { id: 'gemini',     name: 'Google Gemini',  base_url: '',                                  needs_key: true,  key_placeholder: 'AIza...',   color: '#4285F4', initials: 'G',  domain: 'google.com'       },
+  { id: 'openai',     name: 'OpenAI',          base_url: 'https://api.openai.com/v1',         needs_key: true,  key_placeholder: 'sk-...',    color: '#10A37F', initials: 'AI', domain: 'openai.com'       },
+  { id: 'groq',       name: 'Groq',            base_url: 'https://api.groq.com/openai/v1',    needs_key: true,  key_placeholder: 'gsk_...',   color: '#F55036', initials: 'GQ', domain: 'groq.com'         },
+  { id: 'openrouter', name: 'OpenRouter',      base_url: 'https://openrouter.ai/api/v1',      needs_key: true,  key_placeholder: 'sk-or-...', color: '#6467F2', initials: 'OR', domain: 'openrouter.ai'    },
+  { id: 'mistral',    name: 'Mistral',         base_url: 'https://api.mistral.ai/v1',         needs_key: true,  key_placeholder: 'API key',   color: '#FF7000', initials: 'M',  domain: 'mistral.ai'       },
+  { id: 'deepseek',   name: 'DeepSeek',        base_url: 'https://api.deepseek.com/v1',       needs_key: true,  key_placeholder: 'sk-...',    color: '#4D6BFE', initials: 'DS', domain: 'deepseek.com'     },
+  { id: 'together',   name: 'Together AI',     base_url: 'https://api.together.xyz/v1',       needs_key: true,  key_placeholder: 'API key',   color: '#8B5CF6', initials: 'T',  domain: 'together.ai'      },
+  { id: 'ollama',     name: 'Ollama (local)',  base_url: 'http://localhost:11434/v1',          needs_key: false, local: true,                  color: '#1C1C1E', initials: 'OL', domain: 'ollama.com'       },
+  { id: 'lmstudio',   name: 'LM Studio',       base_url: 'http://localhost:1234/v1',           needs_key: false, local: true,                  color: '#7C3AED', initials: 'LM', domain: 'lmstudio.ai'      },
+  { id: 'custom',     name: 'Custom / Other',  base_url: '',                                  needs_key: false,                               color: '#71717A', initials: '?',  domain: null               },
 ];
 
 export const TRANSLATIONS: Record<string, any> = {

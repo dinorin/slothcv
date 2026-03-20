@@ -30,7 +30,7 @@ export default function PreviewPanel({
       {isOpen && (
         <div
           onMouseDown={onResizeStart}
-          className="w-1 cursor-col-resize hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors z-20 shrink-0 border-x border-zinc-100 dark:border-zinc-900"
+          className="hidden sm:block w-1 cursor-col-resize hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors z-20 shrink-0 border-x border-zinc-100 dark:border-zinc-900"
         />
       )}
 

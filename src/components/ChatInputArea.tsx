@@ -34,13 +34,13 @@ export default function ChatInputArea({
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = '0px';
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [input]);
 
   return (
-    <div className="px-6 pb-6 shrink-0 max-w-3xl mx-auto w-full">
+    <div className="px-3 pb-3 sm:px-6 sm:pb-6 shrink-0 max-w-3xl mx-auto w-full">
       <div className="bg-white dark:bg-[#0f0f0f] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm focus-within:ring-2 focus-within:ring-zinc-900/10 dark:focus-within:ring-zinc-100/10 transition-all overflow-hidden">
         {pendingPhoto && (
           <div className="px-3 pt-2.5 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800/50 pb-2">
