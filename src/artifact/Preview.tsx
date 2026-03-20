@@ -2,7 +2,8 @@ import { FileDown, X, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
-import { ResumeData } from '../types';
+import { ResumeData } from './types';
+import { getInjectedHtml } from './utils';
 
 // A4 page dimensions in pixels at 96 DPI
 const A4_W = 794;
@@ -16,12 +17,11 @@ interface Props {
   t: any;
   onResizeStart: (e: React.MouseEvent) => void;
   onClose: () => void;
-  getInjectedHtml: (html?: string) => string;
 }
 
 export default function PreviewPanel({
   width, isOpen, isResizing, resumeData, t,
-  onResizeStart, onClose, getInjectedHtml,
+  onResizeStart, onClose,
 }: Props) {
   return (
     <>

@@ -1,3 +1,4 @@
+mod artifact;
 mod llm;
 mod settings;
 mod storage;

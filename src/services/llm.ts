@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { ResumeData } from '../types';
+import { ResumeData } from '../artifact/types';
 
 interface FunctionCall {
   name: string;
