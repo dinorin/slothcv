@@ -385,7 +385,7 @@ export default function App() {
           width={preview.width}
           isOpen={isPreviewOpen}
           isResizing={preview.isResizing}
-          artifactData={session.resumeData}
+          resumeData={session.resumeData}
           t={t}
           onResizeStart={preview.startResizing}
           onClose={() => setIsPreviewOpen(false)}
