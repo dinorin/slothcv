@@ -17,11 +17,13 @@ interface Props {
   t: any;
   onResizeStart: (e: React.MouseEvent) => void;
   onClose: () => void;
+  onExport?: () => void;
+  isExporting?: boolean;
 }
 
 export default function PreviewPanel({
   width, isOpen, isResizing, resumeData, t,
-  onResizeStart, onClose,
+  onResizeStart, onClose, onExport, isExporting,
 }: Props) {
   return (
     <>
@@ -49,12 +51,24 @@ export default function PreviewPanel({
                   {t.artifactPreview || 'ARTIFACT PREVIEW'}
                 </span>
               </div>
-              <button
-                onClick={onClose}
-                className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-400 transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-1">
+                {resumeData?.resume_html && onExport && (
+                  <button
+                    onClick={onExport}
+                    disabled={isExporting}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-black transition-colors disabled:opacity-60"
+                  >
+                    <FileDown className="w-3 h-3" />
+                    {isExporting ? t.exporting : 'PDF'}
+                  </button>
+                )}
+                <button
+                  onClick={onClose}
+                  className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-400 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-hidden relative bg-zinc-100 dark:bg-[#050505]">

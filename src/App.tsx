@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Eye, EyeOff, FileDown, Settings, MessageSquare } from 'lucide-react';
+import { Eye, EyeOff, Settings, MessageSquare } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
 import TitleBar from './components/TitleBar';
@@ -268,16 +268,6 @@ export default function App() {
             {isPreviewOpen ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             {t.preview}
           </button>
-          {session.resumeData?.resume_html && (
-            <button
-              onClick={handleExportPdf}
-              disabled={isPdfExporting}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium bg-zinc-900 hover:bg-black dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-black transition-colors disabled:opacity-60"
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              {isPdfExporting ? t.exporting : 'PDF'}
-            </button>
-          )}
           <button onClick={() => setSettingsOpen(true)} title={t.settings} className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 transition-colors ml-1">
             <Settings className="w-4 h-4" />
           </button>
@@ -389,6 +379,8 @@ export default function App() {
           t={t}
           onResizeStart={preview.startResizing}
           onClose={() => setIsPreviewOpen(false)}
+          onExport={handleExportPdf}
+          isExporting={isPdfExporting}
         />
       </div>
     </div>
